@@ -65,7 +65,5 @@ Thumbs.db
 *.bak
 *.tmp
 
-# Web Simulator (Node / Vite)
-web-simulator/node_modules/
-web-simulator/dist/
-web-simulator/.vite/
+# Web Simulator (Ignore completely - push core Android app only)
+web-simulator/
