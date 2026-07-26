@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Data extraction rules for Android 12+ (API 31+).
+    Declares what data can be included/excluded in cloud and local backups.
+    Required for Play Store Data Safety declaration compliance.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Include user preferences — these are benign settings, not personal data -->
+        <include domain="sharedpref" path="app_settings.xml"/>
+
+    </cloud-backup>
+    <device-transfer>
+        <!-- Allow usage history DB to transfer — it contains no personal/location data -->
+        <include domain="database" path="usage_db"/>
+    </device-transfer>
+</data-extraction-rules>

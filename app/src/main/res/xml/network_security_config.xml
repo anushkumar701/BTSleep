@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network Security Configuration.
+    SleepBT does NOT make any network calls itself.
+    This config is required by Play Store for apps targeting API 28+
+    to explicitly declare cleartext policy. We disallow it for safety.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

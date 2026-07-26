@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Full backup rules for Android 6-11.
+    Play Store requires declaring what gets backed up / excluded.
+-->
+<full-backup-content>
+    <!-- Restore user prefs (safe, no PII) -->
+    <include domain="sharedpref" path="app_settings.xml" />
+
+</full-backup-content>
