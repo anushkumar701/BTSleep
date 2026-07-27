@@ -182,7 +182,7 @@ private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> 
 private fun SettingsDivider() {
     HorizontalDivider(
         modifier = Modifier.padding(horizontal = 16.dp),
-        color = SpaceBorder,
+        color = SpaceSurfaceHigh,
         thickness = 0.5.dp
     )
 }
@@ -226,7 +226,7 @@ private fun SettingsToggle(
                     checkedTrackColor = AccentBlue.copy(0.25f),
                     uncheckedThumbColor = TextTertiary,
                     uncheckedTrackColor = SpaceSurface2,
-                    uncheckedBorderColor = SpaceBorder
+                    uncheckedBorderColor = SpaceSurfaceHigh
                 )
             )
         }

@@ -22,7 +22,7 @@ private val DarkColorScheme = darkColorScheme(
     onSurface        = TextPrimary,
     surfaceVariant   = SpaceSurface2,
     onSurfaceVariant = TextSecondary,
-    outline          = SpaceBorder,
+    outline          = SpaceSurfaceHigh,
     error            = ErrorRed,
     onError          = TextOnAccent
 )

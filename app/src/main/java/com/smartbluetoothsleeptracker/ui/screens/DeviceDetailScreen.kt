@@ -38,7 +38,7 @@ fun DeviceDetailScreen(
             text  = { Text("This clears all recorded usage hours for \"${stat.deviceName}\". Sessions will still appear in history.", color = TextSecondary) },
             confirmButton = {
                 TextButton(onClick = { onResetTiming(stat.deviceName); showResetDialog = false; onBack() }) {
-                    Text("Reset", color = Color(0xFFFFB300), fontWeight = FontWeight.Bold)
+                    Text("Reset", color = Warning, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -55,7 +55,7 @@ fun DeviceDetailScreen(
             text  = { Text("All session history for \"${stat.deviceName}\" will be permanently deleted.", color = TextSecondary) },
             confirmButton = {
                 TextButton(onClick = { onRemoveDevice(stat.deviceName); showRemoveDialog = false; onBack() }) {
-                    Text("Remove", color = Color(0xFFFF4D6A), fontWeight = FontWeight.Bold)
+                    Text("Remove", color = ErrorRed, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -136,9 +136,9 @@ fun DeviceDetailScreen(
                         .padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(Modifier.size(44.dp).background(Color(0xFFFFB300).copy(0.12f), CircleShape),
+                    Box(Modifier.size(44.dp).background(Warning.copy(0.12f), CircleShape),
                         contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Refresh, null, tint = Color(0xFFFFB300), modifier = Modifier.size(22.dp))
+                        Icon(Icons.Rounded.Refresh, null, tint = Warning, modifier = Modifier.size(22.dp))
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
@@ -162,14 +162,14 @@ fun DeviceDetailScreen(
                         .padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(Modifier.size(44.dp).background(Color(0xFFFF4D6A).copy(0.12f), CircleShape),
+                    Box(Modifier.size(44.dp).background(ErrorRed.copy(0.12f), CircleShape),
                         contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Delete, null, tint = Color(0xFFFF4D6A), modifier = Modifier.size(22.dp))
+                        Icon(Icons.Rounded.Delete, null, tint = ErrorRed, modifier = Modifier.size(22.dp))
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Remove Device", style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold, color = Color(0xFFFF4D6A))
+                            fontWeight = FontWeight.SemiBold, color = ErrorRed)
                         Text("Permanently delete all history for this device",
                             style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                     }

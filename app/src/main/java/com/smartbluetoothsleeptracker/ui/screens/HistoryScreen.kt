@@ -54,7 +54,7 @@ fun HistoryScreen(
             text  = { Text("This permanently deletes all session records.", color = TextSecondary) },
             confirmButton = {
                 TextButton(onClick = { viewModel.clearAll(); showClearAllDialog = false }) {
-                    Text("Clear All", color = Color(0xFFFF4D6A), fontWeight = FontWeight.Bold)
+                    Text("Clear All", color = ErrorRed, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -252,8 +252,8 @@ private fun WeeklyBarChart(allSessions: List<SessionEntity>) {
             days.forEach { (label, minutes, isToday) ->
                 val frac = (minutes / maxMin.toFloat()).coerceIn(0.05f, 1f)
                 val barColor = when {
-                    minutes > 120 -> Color(0xFFFF4D6A)
-                    minutes > 60  -> Color(0xFFFFB300)
+                    minutes > 120 -> ErrorRed
+                    minutes > 60  -> Warning
                     else          -> AccentBlue
                 }
                 val animFrac by animateFloatAsState(frac,
@@ -288,8 +288,8 @@ private fun WeeklyBarChart(allSessions: List<SessionEntity>) {
         // Legend
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             LegendDot(AccentBlue, "≤ 1h")
-            LegendDot(Color(0xFFFFB300), "1–2h")
-            LegendDot(Color(0xFFFF4D6A), "> 2h")
+            LegendDot(Warning, "1–2h")
+            LegendDot(ErrorRed, "> 2h")
         }
     }
 }
@@ -351,7 +351,7 @@ private fun SwipeToDeleteBox(onDelete: () -> Unit, content: @Composable () -> Un
         Box(modifier = Modifier.weight(1f)) { content() }
         AnimatedVisibility(visible = showDelete) {
             IconButton(onClick = { onDelete(); showDelete = false }, modifier = Modifier.padding(start = 4.dp)) {
-                Icon(Icons.Rounded.Delete, null, tint = Color(0xFFFF4D6A))
+                Icon(Icons.Rounded.Delete, null, tint = ErrorRed)
             }
         }
     }

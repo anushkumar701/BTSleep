@@ -124,7 +124,10 @@ class SleepTimerService : Service() {
         batteryCheckJob = scope.launch {
             while (true) {
                 delay(120_000L)
-                checkBatterySaver()
+                // Skip immediately if the feature is disabled — avoid blocking the thread
+                val settings = app.prefs.settings.first()
+                if (!settings.batterySaverEnabled) continue
+                checkBatterySaver(settings)
             }
         }
     }
@@ -151,14 +154,25 @@ class SleepTimerService : Service() {
         blockerJob = scope.launch(Dispatchers.IO) {
             repeat(40) {            // 40 × 3 s = 120 s = 2 min max
                 delay(3_000L)
-                if (!app.btDisconnector.isBlockerActive) return@launch
+                if (!app.btDisconnector.isBlockerActive) {
+                    // Blocker window expired — clean up
+                    app.btDisconnector.clearBlocker()
+                    refreshNotification()
+                    stopSelfIfIdle()
+                    return@launch
+                }
                 app.btDisconnector.disconnectAllConnectedNow()
             }
+            // Enforcement window complete — final cleanup
+            app.btDisconnector.clearBlocker()
+            refreshNotification()
+            stopSelfIfIdle()
         }
     }
 
-    private suspend fun checkBatterySaver() {
-        val settings = app.prefs.settings.first()
+    private suspend fun checkBatterySaver(
+        settings: com.smartbluetoothsleeptracker.data.prefs.AppSettings
+    ) {
         if (!settings.batterySaverEnabled) return
         if (!app.btMonitor.hasConnectedDevice()) return
 

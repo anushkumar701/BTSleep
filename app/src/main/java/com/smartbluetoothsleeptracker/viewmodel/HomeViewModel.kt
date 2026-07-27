@@ -72,13 +72,13 @@ class HomeViewModel(
 
     fun adjustMinutes(delta: Long) {
         val current = _selectedMinutes.value
-        val new = (current + delta).coerceIn(1L, 60L)
+        val new = (current + delta).coerceIn(5L, 120L)
         _selectedMinutes.value = new
         viewModelScope.launch { prefs.setSelectedMinutes(new) }
     }
 
     fun setMinutes(minutes: Long) {
-        _selectedMinutes.value = minutes.coerceIn(1L, 60L)
+        _selectedMinutes.value = minutes.coerceIn(5L, 120L)
         viewModelScope.launch { prefs.setSelectedMinutes(minutes) }
     }
 

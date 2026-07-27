@@ -29,9 +29,9 @@ fun HealthScreen(
 
     val statusColor by animateColorAsState(
         targetValue = when (state.status) {
-            UsageStatus.SAFE    -> Color(0xFF00D68F)
-            UsageStatus.MODERATE -> Color(0xFFFFB300)
-            UsageStatus.HIGH    -> Color(0xFFFF4D6A)
+            UsageStatus.SAFE    -> ConnectedGreen
+            UsageStatus.MODERATE -> Warning
+            UsageStatus.HIGH    -> ErrorRed
         },
         animationSpec = tween(600),
         label = "status_color"
@@ -149,11 +149,11 @@ fun HealthScreen(
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(Modifier.height(12.dp))
-                GuidelineRow(Color(0xFF00D68F), "≤ 60 min", "Safe — sustainable daily use")
+                GuidelineRow(ConnectedGreen, "≤ 60 min", "Safe — sustainable daily use")
                 Spacer(Modifier.height(8.dp))
-                GuidelineRow(Color(0xFFFFB300), "60–120 min", "Moderate — reduce when possible")
+                GuidelineRow(Warning, "60–120 min", "Moderate — reduce when possible")
                 Spacer(Modifier.height(8.dp))
-                GuidelineRow(Color(0xFFFF4D6A), "> 120 min", "High — take extended breaks")
+                GuidelineRow(ErrorRed, "> 120 min", "High — take extended breaks")
                 Spacer(Modifier.height(12.dp))
                 Text(
                     "⚠ This is informational only. SleepBT cannot measure actual sound volume.",

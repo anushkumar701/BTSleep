@@ -42,18 +42,14 @@ import kotlin.math.*
 // ── Constants ──────────────────────────────────────────────────────────────────
 private const val DIAL_START_ANGLE = 135f   // degrees — bottom-left
 private const val DIAL_SWEEP       = 270f   // degrees swept for full range
-private const val DIAL_MIN_MIN     = 1L     // minimum selectable minutes
-private const val DIAL_MAX_MIN     = 60L    // maximum selectable minutes (1 hour) — spec: max 60
+private const val DIAL_MIN_MIN     = 5L     // minimum selectable minutes
+private const val DIAL_MAX_MIN     = 120L   // maximum selectable minutes (2 hours)
 
-/** Maps a raw angle (0–360) onto the dial arc [0, DIAL_SWEEP] */
 private fun angleToDial(angleDeg: Float): Float {
-    // Offset so 0° = start of arc
     var a = (angleDeg - DIAL_START_ANGLE + 360f) % 360f
-    // Wrap: anything beyond DIAL_SWEEP+tolerance → clamp
     return a.coerceIn(0f, DIAL_SWEEP)
 }
 
-/** Maps dial fraction [0,1] → minutes [1, 60] snapped to 5-min steps */
 private fun fractionToMinutes(fraction: Float): Long {
     val raw = (fraction * (DIAL_MAX_MIN - DIAL_MIN_MIN) + DIAL_MIN_MIN).toLong()
     return ((raw + 2L) / 5L * 5L).coerceIn(DIAL_MIN_MIN, DIAL_MAX_MIN)
@@ -65,6 +61,7 @@ fun HomeScreen(
     onStartTimer: (Long) -> Unit,
     onCancelTimer: () -> Unit,
     onExtendTimer: () -> Unit,
+    onDisconnectNow: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val state    by homeVm.state.collectAsStateWithLifecycle()
@@ -79,11 +76,11 @@ fun HomeScreen(
         label = "arc_progress"
     )
 
-    // Subtle glow pulse when running
+    // Breathing glow animation
     val infiniteTransition = rememberInfiniteTransition(label = "glow")
     val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.06f, targetValue = 0.16f,
-        animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        initialValue = 0.08f, targetValue = 0.22f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "glow_alpha"
     )
 
@@ -98,65 +95,71 @@ fun HomeScreen(
 
     Box(modifier = modifier.fillMaxSize().background(DeepSpace)) {
 
-        // Background glow blob when running
-        if (state.timerRunning) {
-            Box(
-                modifier = Modifier
-                    .size(300.dp)
-                    .align(Alignment.Center)
-                    .offset(y = (-40).dp)
-                    .background(
-                        Brush.radialGradient(listOf(AccentBlue.copy(alpha = glowAlpha), Color.Transparent)),
-                        CircleShape
-                    )
-            )
-        }
+        // Ambient Sleep Pulse Background Halo
+        Box(
+            modifier = Modifier
+                .size(320.dp)
+                .align(Alignment.Center)
+                .offset(y = (-30).dp)
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            if (isActive) AccentPurple.copy(alpha = glowAlpha) else AccentBlue.copy(alpha = glowAlpha),
+                            Color.Transparent
+                        )
+                    ),
+                    CircleShape
+                )
+        )
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
 
-            // ── Status Card ──────────────────────────────────────────────────
+            // ── Status Header Card ──────────────────────────────────────────
             StatusCard(
                 deviceName    = state.deviceName,
                 isConnected   = state.isConnected,
+                btEnabled     = state.bluetoothEnabled,
                 blockerActive = state.blockerActive,
-                clockText     = clockText
+                clockText     = clockText,
+                onDisconnectNow = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onDisconnectNow()
+                }
             )
 
-            // ── Warning Banner ───────────────────────────────────────────────
+            // ── Warning Banner (Informational only, never blocks user!) ───
             AnimatedVisibility(
-                visible = !state.bluetoothEnabled || (!state.isConnected && !isActive),
+                visible = !state.bluetoothEnabled,
                 enter = fadeIn(tween(300)) + expandVertically(),
                 exit  = fadeOut(tween(200)) + shrinkVertically()
             ) {
                 Spacer(Modifier.height(10.dp))
-                WarningBanner(btOff = !state.bluetoothEnabled)
+                WarningBanner(btOff = true)
             }
 
             Spacer(Modifier.weight(1f))
 
-            // ── Main Area: Dial (idle) OR Timer Ring (active) ────────────────
+            // ── Main Dial OR Countdown Ring ────────────────────────────────
             if (!isActive) {
-                // Draggable circular dial for setting time
                 DialTimerSelector(
                     minutes   = state.selectedMinutes,
                     onMinutes = { homeVm.setMinutes(it) },
                     haptic    = haptic
                 )
-    } else {
-        // Active countdown ring — spec: animated countdown ring
-        TimerRing(
-            progress    = arcProgress,
-            isPaused    = state.timerPaused,
-            countdownText = state.countdownText
-        )
-    }
+            } else {
+                TimerRing(
+                    progress      = arcProgress,
+                    isPaused      = state.timerPaused,
+                    countdownText = state.countdownText
+                )
+            }
 
             // Paused banner
             AnimatedVisibility(visible = state.timerPaused) {
@@ -168,43 +171,42 @@ fun HomeScreen(
 
             Spacer(Modifier.weight(1f))
 
-            // ── Control Buttons ──────────────────────────────────────────────
+            // ── Main Action Controls ───────────────────────────────────────
             ControlButtons(
-                isRunning = state.timerRunning,
-                isPaused  = state.timerPaused,
-                btReady   = state.isConnected && state.bluetoothEnabled,
-                onStart   = {
+                isRunning       = state.timerRunning,
+                isPaused        = state.timerPaused,
+                isConnected     = state.isConnected,
+                selectedMinutes = state.selectedMinutes,
+                onStart         = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onStartTimer(state.selectedMinutes)
                 },
-                onCancel  = {
+                onCancel        = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onCancelTimer()
                 },
-                onExtend  = {
+                onExtend        = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onExtendTimer()
+                },
+                onDisconnectNow = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onDisconnectNow()
                 }
             )
 
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
 
 // ── Dial Timer Selector ────────────────────────────────────────────────────────
-
-/**
- * A draggable circular dial: user drags finger around the circle to set sleep time.
- * Arc spans 270° (bottom-left → bottom-right). Snaps to 5-min increments.
- */
 @Composable
 private fun DialTimerSelector(
     minutes: Long,
     onMinutes: (Long) -> Unit,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback
 ) {
-    // Convert current minutes → dial fraction for drawing
     val fraction = ((minutes - DIAL_MIN_MIN).toFloat() / (DIAL_MAX_MIN - DIAL_MIN_MIN).toFloat()).coerceIn(0f, 1f)
     val sweepAngle = fraction * DIAL_SWEEP
 
@@ -212,26 +214,25 @@ private fun DialTimerSelector(
     var centerPx by remember { mutableStateOf(Offset.Zero) }
     var sizePx   by remember { mutableStateOf(0f) }
 
-    val dialSize = 280.dp
+    val dialSize = 290.dp
 
     Box(
         modifier = Modifier.size(dialSize),
         contentAlignment = Alignment.Center
     ) {
-        // Canvas for track + filled arc + thumb dot
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .drawWithCache {
-                    val stroke = Stroke(width = 22f, cap = StrokeCap.Round)
-                    val inset  = 22f / 2f
+                    val stroke = Stroke(width = 24f, cap = StrokeCap.Round)
+                    val inset  = 24f / 2f
                     val arcRect = Size(size.width - inset * 2, size.height - inset * 2)
                     val topLeft = Offset(inset, inset)
                     centerPx = Offset(size.width / 2f, size.height / 2f)
                     sizePx   = size.width / 2f - inset
 
                     onDrawBehind {
-                        // Track (grey)
+                        // Track
                         drawArc(
                             color = SpaceSurface2,
                             startAngle = DIAL_START_ANGLE,
@@ -241,11 +242,11 @@ private fun DialTimerSelector(
                             size       = arcRect,
                             style      = stroke
                         )
-                        // Filled arc (blue gradient)
+                        // Filled Arc (Cyan to Purple Gradient)
                         if (sweepAngle > 0f) {
                             drawArc(
                                 brush = Brush.sweepGradient(
-                                    listOf(AccentBlue.copy(0.7f), AccentBlue, AccentCyan.copy(0.8f))
+                                    listOf(AccentBlue, AccentCyan, AccentPurple)
                                 ),
                                 startAngle = DIAL_START_ANGLE,
                                 sweepAngle = sweepAngle,
@@ -254,13 +255,13 @@ private fun DialTimerSelector(
                                 size       = arcRect,
                                 style      = stroke
                             )
-                            // Thumb dot at tip of arc
+                            // Glowing Thumb Knob
                             val thumbAngleRad = Math.toRadians((DIAL_START_ANGLE + sweepAngle).toDouble())
                             val r = sizePx
                             val thumbX = centerPx.x + r * cos(thumbAngleRad).toFloat()
                             val thumbY = centerPx.y + r * sin(thumbAngleRad).toFloat()
-                            drawCircle(color = Color.White, radius = 14f, center = Offset(thumbX, thumbY))
-                            drawCircle(color = AccentBlue,  radius = 9f,  center = Offset(thumbX, thumbY))
+                            drawCircle(color = Color.White, radius = 16f, center = Offset(thumbX, thumbY))
+                            drawCircle(color = AccentBlue,  radius = 10f, center = Offset(thumbX, thumbY))
                         }
                     }
                 }
@@ -268,7 +269,7 @@ private fun DialTimerSelector(
                     detectDragGestures(
                         onDragStart = { _ ->
                             centerPx = Offset(size.width / 2f, size.height / 2f)
-                            sizePx   = size.width / 2f - 11f
+                            sizePx   = size.width / 2f - 12f
                         }
                     ) { change, _ ->
                         change.consume()
@@ -287,7 +288,7 @@ private fun DialTimerSelector(
                 }
         )
 
-        // Center text display
+        // Center Time Text Display
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             val h = minutes / 60L
             val m = minutes % 60L
@@ -297,38 +298,43 @@ private fun DialTimerSelector(
 
             Text(
                 text = timeStr,
-                style = MaterialTheme.typography.displayMedium,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.displayMedium.copy(fontSize = 44.sp),
+                fontWeight = FontWeight.Black,
                 color = TextPrimary,
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "drag to set",
+                text = "SLEEP TIMER DURATION",
                 style = MaterialTheme.typography.labelSmall,
-                color = TextTertiary,
-                letterSpacing = 1.sp
+                color = AccentBlue,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.5.sp
             )
-            Spacer(Modifier.height(10.dp))
-            // Quick-select chips below center — spec: [10m, 20m, 30m, 60m]
+            Spacer(Modifier.height(14.dp))
+
+            // Quick Preset Chips
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(10L, 20L, 30L, 60L).forEach { preset ->
-                    val sel = minutes == preset
+                listOf(15L, 30L, 45L, 60L, 90L).forEach { preset ->
+                    val selected = minutes == preset
                     Box(
                         modifier = Modifier
-                            .background(if (sel) AccentBlue else SpaceSurface2, RoundedCornerShape(8.dp))
-                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (selected) AccentBlue else SpaceSurface2,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onMinutes(preset)
                             }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            if (preset >= 60) "${preset / 60}h" else "${preset}m",
+                            text = if (preset >= 60) "${preset / 60}h" else "${preset}m",
                             style = MaterialTheme.typography.labelSmall,
-                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                            color = if (sel) Color.White else TextSecondary
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) TextOnAccent else TextSecondary
                         )
                     }
                 }
@@ -337,98 +343,126 @@ private fun DialTimerSelector(
     }
 }
 
-// ── Active Timer Ring (shown when timer is running/paused) ─────────────────────
+// ── Countdown Ring ─────────────────────────────────────────────────────────────
 @Composable
 private fun TimerRing(progress: Float, isPaused: Boolean, countdownText: String) {
-    Box(modifier = Modifier.size(280.dp), contentAlignment = Alignment.Center) {
-        // Track
+    Box(modifier = Modifier.size(290.dp), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(
             progress = { 1f },
-            modifier = Modifier.size(260.dp),
-            strokeWidth = 10.dp,
+            modifier = Modifier.size(270.dp),
+            strokeWidth = 12.dp,
             color = SpaceSurface2,
             trackColor = Color.Transparent,
             strokeCap = StrokeCap.Round
         )
-        // Filled arc
         CircularProgressIndicator(
             progress = { progress },
-            modifier = Modifier.size(260.dp),
-            strokeWidth = 10.dp,
+            modifier = Modifier.size(270.dp),
+            strokeWidth = 12.dp,
             color = if (isPaused) AccentPurple else AccentBlue,
             trackColor = Color.Transparent,
             strokeCap = StrokeCap.Round
         )
-        // Center text
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             if (isPaused) {
-                Text("PAUSED", style = MaterialTheme.typography.labelMedium,
-                    color = AccentPurple, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+                Text(
+                    "PAUSED",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AccentPurple,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 3.sp
+                )
                 Spacer(Modifier.height(2.dp))
             }
             Text(
                 text = countdownText,
-                style = MaterialTheme.typography.displayLarge.copy(fontSize = if (isPaused) 46.sp else 52.sp),
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.displayLarge.copy(fontSize = if (isPaused) 46.sp else 54.sp),
+                fontWeight = FontWeight.Black,
                 color = if (isPaused) AccentPurple else TextPrimary,
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(4.dp))
-            Text("UNTIL DISCONNECT", style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary, letterSpacing = 1.5.sp)
+            Text(
+                text = "UNTIL AUTO DISCONNECT",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.8.sp
+            )
         }
     }
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
-
+// ── Status Header Card ─────────────────────────────────────────────────────────
 @Composable
-private fun StatusCard(deviceName: String?, isConnected: Boolean, blockerActive: Boolean, clockText: String) {
+private fun StatusCard(
+    deviceName: String?,
+    isConnected: Boolean,
+    btEnabled: Boolean,
+    blockerActive: Boolean,
+    clockText: String,
+    onDisconnectNow: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SpaceSurface, RoundedCornerShape(20.dp))
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .background(SpaceSurface, RoundedCornerShape(24.dp))
+            .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            ConnectionBadge(isConnected = isConnected)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ConnectionBadge(isConnected = isConnected)
+                if (blockerActive) {
+                    Text(
+                        "BLOCKING",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ErrorRed,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp
+                    )
+                }
+            }
             Spacer(Modifier.height(4.dp))
             Text(
                 text = when {
-                    blockerActive -> "Blocking reconnect..."
-                    isConnected   -> deviceName ?: "Bluetooth Device"
-                    else          -> "No device connected"
+                    blockerActive -> "Blocking auto-reconnect"
+                    isConnected   -> deviceName ?: "Bluetooth Device Connected"
+                    btEnabled     -> "Bluetooth Active (Standby)"
+                    else          -> "Bluetooth Radio Off"
                 },
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
                 color = TextPrimary
             )
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(clockText, style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold, color = TextSecondary)
-            Spacer(Modifier.height(4.dp))
-            Box(
-                modifier = Modifier.size(28.dp)
-                    .background(
-                        when {
-                            blockerActive -> ErrorRed.copy(0.15f)
-                            isConnected   -> ConnectedGreen.copy(0.12f)
-                            else          -> SpaceSurface2
-                        }, CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    if (blockerActive) Icons.Rounded.Block else Icons.Rounded.Bluetooth,
-                    null,
-                    tint = when {
-                        blockerActive -> ErrorRed
-                        isConnected   -> ConnectedGreen
-                        else          -> TextTertiary
-                    },
-                    modifier = Modifier.size(14.dp)
+
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Quick Emergency Disconnect Button right in header
+            if (isConnected || blockerActive) {
+                Box(
+                    modifier = Modifier
+                        .background(ErrorRed.copy(0.15f), RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onDisconnectNow() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        "OFF NOW",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ErrorRed,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = clockText,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary
                 )
             }
         }
@@ -438,22 +472,18 @@ private fun StatusCard(deviceName: String?, isConnected: Boolean, blockerActive:
 @Composable
 private fun WarningBanner(btOff: Boolean) {
     Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(
-                if (btOff) ErrorRed.copy(0.10f) else Warning.copy(0.10f),
-                RoundedCornerShape(14.dp)
-            )
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Warning.copy(0.12f), RoundedCornerShape(16.dp))
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Icon(Icons.Rounded.Warning, null,
-            tint = if (btOff) ErrorRed else Warning, modifier = Modifier.size(16.dp))
+        Icon(Icons.Rounded.Warning, null, tint = Warning, modifier = Modifier.size(18.dp))
         Text(
-            text = if (btOff) "Bluetooth is off — turn it on to use the timer"
-                   else        "Connect a Bluetooth device to start the sleep timer",
+            text = "Bluetooth radio is currently off. Timer will turn off Bluetooth hardware when countdown ends.",
             style = MaterialTheme.typography.bodySmall,
-            color = if (btOff) ErrorRed else Warning,
+            color = Warning,
             fontWeight = FontWeight.Medium
         )
     }
@@ -462,15 +492,16 @@ private fun WarningBanner(btOff: Boolean) {
 @Composable
 private fun PausedBanner() {
     Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(AccentPurple.copy(0.10f), RoundedCornerShape(14.dp))
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AccentPurple.copy(0.12f), RoundedCornerShape(16.dp))
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         PulsingDot(color = AccentPurple)
         Text(
-            "Timer paused — will resume when device reconnects",
+            "Timer paused — will resume automatically when audio device reconnects",
             style = MaterialTheme.typography.bodySmall,
             color = AccentPurple,
             fontWeight = FontWeight.Medium
@@ -482,10 +513,12 @@ private fun PausedBanner() {
 private fun ControlButtons(
     isRunning: Boolean,
     isPaused: Boolean,
-    btReady: Boolean,
+    isConnected: Boolean,
+    selectedMinutes: Long,
     onStart: () -> Unit,
     onCancel: () -> Unit,
-    onExtend: () -> Unit
+    onExtend: () -> Unit,
+    onDisconnectNow: () -> Unit
 ) {
     AnimatedContent(
         targetState = isRunning || isPaused,
@@ -493,57 +526,90 @@ private fun ControlButtons(
         label = "btn_anim"
     ) { active ->
         if (active) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // STOP TIMER BUTTON
                     Button(
                         onClick = onCancel,
-                        modifier = Modifier.weight(1f).height(58.dp),
-                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.weight(1f).height(60.dp),
+                        shape = RoundedCornerShape(22.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = SpaceSurface2)
                     ) {
-                        Icon(Icons.Rounded.Stop, null, tint = ErrorRed, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Rounded.Stop, null, tint = ErrorRed, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("STOP", fontWeight = FontWeight.Bold, color = ErrorRed, style = MaterialTheme.typography.labelLarge)
+                        Text("STOP", fontWeight = FontWeight.Bold, color = ErrorRed, style = MaterialTheme.typography.titleMedium)
                     }
-                    if (isRunning) {
-                        Button(
-                            onClick = onExtend,
-                            modifier = Modifier.weight(1f).height(58.dp),
-                            shape = RoundedCornerShape(18.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
-                        ) {
-                            Icon(Icons.Rounded.Add, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("+10 MIN", fontWeight = FontWeight.Bold, color = Color.White, style = MaterialTheme.typography.labelLarge)
-                        }
+
+                    // EXTEND TIMER BUTTON
+                    Button(
+                        onClick = onExtend,
+                        modifier = Modifier.weight(1f).height(60.dp),
+                        shape = RoundedCornerShape(22.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
+                    ) {
+                        Icon(Icons.Rounded.Add, null, tint = TextOnAccent, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("+10 MIN", fontWeight = FontWeight.Bold, color = TextOnAccent, style = MaterialTheme.typography.titleMedium)
                     }
+                }
+
+                // INSTANT HARD DISCONNECT BUTTON
+                Button(
+                    onClick = onDisconnectNow,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed.copy(0.15f))
+                ) {
+                    Icon(Icons.Rounded.PowerSettingsNew, null, tint = ErrorRed, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("DISCONNECT BLUETOOTH NOW", fontWeight = FontWeight.Bold, color = ErrorRed, style = MaterialTheme.typography.labelLarge)
                 }
             }
         } else {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // START TIMER BUTTON (ALWAYS ENABLED!)
                 Button(
                     onClick = onStart,
-                    enabled = btReady,
-                    modifier = Modifier.fillMaxWidth().height(62.dp),
-                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp),
+                    shape = RoundedCornerShape(22.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentBlue,
-                        disabledContainerColor = SpaceSurface2
+                        containerColor = AccentBlue
                     )
                 ) {
-                    Icon(Icons.Rounded.PlayArrow, null,
-                        tint = if (btReady) Color.White else TextTertiary,
-                        modifier = Modifier.size(22.dp))
+                    Icon(Icons.Rounded.PlayArrow, null, tint = TextOnAccent, modifier = Modifier.size(26.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("START TIMER", style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (btReady) Color.White else TextTertiary)
+                    Text(
+                        text = "START SLEEP TIMER ($selectedMinutes MINS)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        color = TextOnAccent
+                    )
                 }
-                if (!btReady) {
-                    Spacer(Modifier.height(6.dp))
-                    Text("Requires a connected Bluetooth device",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextTertiary, textAlign = TextAlign.Center)
+
+                // DISCONNECT NOW QUICK TEST BUTTON
+                OutlinedButton(
+                    onClick = onDisconnectNow,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed)
+                ) {
+                    Icon(Icons.Rounded.BluetoothDisabled, null, tint = ErrorRed, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "DISCONNECT BLUETOOTH NOW (MANUAL TEST)",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = ErrorRed
+                    )
                 }
             }
         }

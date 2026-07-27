@@ -36,26 +36,21 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings by settingsVm.settings.collectAsStateWithLifecycle()
 
-            // ── Permission launcher ──────────────────────────────────────────
             val permLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions()
-            ) { /* results handled reactively by the OS */ }
+            ) { }
 
-            // ── Notification permission — separate launcher for better UX ────
             val notifLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
-            ) { /* granted or denied — service will still work without it */ }
+            ) { }
 
             SleepBTTheme(themeMode = settings.themeMode) {
 
                 if (!settings.onboardingComplete) {
-                    // ── FIRST LAUNCH: Onboarding ─────────────────────────────
                     OnboardingScreen(onComplete = {
                         settingsVm.completeOnboarding()
-                        // Request BT + location permissions
                         val missing = btPermissions().filter { !isGranted(it) }
                         if (missing.isNotEmpty()) permLauncher.launch(missing.toTypedArray())
-                        // Request POST_NOTIFICATIONS separately (better system dialog)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             if (!isGranted(Manifest.permission.POST_NOTIFICATIONS)) {
                                 notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -63,12 +58,10 @@ class MainActivity : ComponentActivity() {
                         }
                     })
                 } else {
-                    // ── NORMAL LAUNCH: Check for any missing permissions ──────
                     LaunchedEffect(Unit) {
                         val missing = btPermissions().filter { !isGranted(it) }
                         if (missing.isNotEmpty()) permLauncher.launch(missing.toTypedArray())
                     }
-                    // Notification permission — shown once if not granted
                     LaunchedEffect(Unit) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             if (!isGranted(Manifest.permission.POST_NOTIFICATIONS)) {
@@ -91,6 +84,10 @@ class MainActivity : ComponentActivity() {
                         onExtendTimer = {
                             app.timerManager.extendTimer(10L)
                             ContextCompat.startForegroundService(this, SleepTimerService.startIntent(this))
+                        },
+                        onDisconnectNow = {
+                            app.btDisconnector.disconnectAll()
+                            ContextCompat.startForegroundService(this, SleepTimerService.disconnectNowIntent(this))
                         }
                     )
                 }

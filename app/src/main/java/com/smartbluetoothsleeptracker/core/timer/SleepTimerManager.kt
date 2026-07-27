@@ -139,7 +139,7 @@ class SleepTimerManager(
         tickJob?.cancel()
         tickJob = scope.launch {
             while (true) {
-                delay(500L)
+                delay(1_000L)
                 val endWall = _state.value.endWallClock ?: break
                 val remaining = (endWall - System.currentTimeMillis()).coerceAtLeast(0L)
                 _state.update { it.copy(remainingMillis = remaining) }

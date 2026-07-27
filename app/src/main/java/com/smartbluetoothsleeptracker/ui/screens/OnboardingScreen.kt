@@ -37,19 +37,19 @@ private val PAGES = listOf(
         icon = Icons.Rounded.Bedtime,
         title = "Sleep Smarter",
         subtitle = "SleepBT automatically disconnects your Bluetooth earbuds at your set bedtime — so you wake up refreshed, not tangled.",
-        gradient = listOf(Color(0xFF0A0A2E), Color(0xFF0E0E44))
+        gradient = listOf(DeepSpace, SpaceSurface)
     ),
     OnboardingPage(
         icon = Icons.Rounded.Bluetooth,
         title = "Effortless Control",
         subtitle = "Set a sleep timer, pick your device, and relax. SleepBT works silently in the background — even when your phone screen is off.",
-        gradient = listOf(Color(0xFF0A0A2E), Color(0xFF0D1530))
+        gradient = listOf(DeepSpace, SpaceSurfaceLowest)
     ),
     OnboardingPage(
         icon = Icons.Rounded.HealthAndSafety,
         title = "Protect Your Hearing",
         subtitle = "Track your daily listening hours and get ear health insights based on WHO guidelines. Your ears will thank you.",
-        gradient = listOf(Color(0xFF0A0A2E), Color(0xFF140A2E))
+        gradient = listOf(DeepSpace, SpaceSurface2)
     )
 )
 
@@ -180,7 +180,7 @@ private fun TermsPage(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFF0A0A2E), DeepSpace)))
+            .background(Brush.verticalGradient(listOf(SpaceSurfaceLowest, DeepSpace)))
             .systemBarsPadding()
             .padding(horizontal = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally

@@ -39,14 +39,14 @@ fun AppNavigation(
     healthVm: HealthViewModel,
     onStartTimer: (Long) -> Unit,
     onCancelTimer: () -> Unit,
-    onExtendTimer: () -> Unit
+    onExtendTimer: () -> Unit,
+    onDisconnectNow: () -> Unit
 ) {
     val navController = rememberNavController()
 
     Scaffold(
         containerColor = DeepSpace,
         bottomBar = {
-            // Hide bottom bar when on DeviceDetail page
             val navBackStack by navController.currentBackStackEntryAsState()
             val currentRoute = navBackStack?.destination?.route
             val isDetailPage = currentRoute?.startsWith("device_detail/") == true
@@ -69,17 +69,22 @@ fun AppNavigation(
                                 }
                             },
                             icon = {
-                                Icon(screen.icon, screen.label,
-                                    tint = if (selected) AccentBlue else TextTertiary)
+                                Icon(
+                                    screen.icon,
+                                    screen.label,
+                                    tint = if (selected) AccentBlue else TextTertiary
+                                )
                             },
                             label = {
-                                Text(screen.label,
+                                Text(
+                                    screen.label,
                                     color = if (selected) AccentBlue else TextTertiary,
-                                    style = MaterialTheme.typography.labelSmall)
+                                    style = MaterialTheme.typography.labelSmall
+                                )
                             },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = AccentBlue,
-                                indicatorColor = AccentBlue.copy(alpha = 0.12f)
+                                indicatorColor = AccentBlue.copy(alpha = 0.16f)
                             )
                         )
                     }
@@ -95,8 +100,10 @@ fun AppNavigation(
             composable(Screen.Home.route) {
                 HomeScreen(
                     homeVm = homeVm,
-                    onStartTimer = onStartTimer, onCancelTimer = onCancelTimer,
-                    onExtendTimer = onExtendTimer
+                    onStartTimer = onStartTimer,
+                    onCancelTimer = onCancelTimer,
+                    onExtendTimer = onExtendTimer,
+                    onDisconnectNow = onDisconnectNow
                 )
             }
             composable(Screen.History.route) {
@@ -115,7 +122,6 @@ fun AppNavigation(
                 SettingsScreen(viewModel = settingsVm)
             }
 
-            // Device Detail — receives device name via URL-encoded path arg
             composable(
                 route = "device_detail/{deviceName}",
                 arguments = listOf(navArgument("deviceName") { type = NavType.StringType })
