@@ -88,7 +88,8 @@ class MainActivity : ComponentActivity() {
                         onDisconnectNow = {
                             app.btDisconnector.disconnectAll()
                             ContextCompat.startForegroundService(this, SleepTimerService.disconnectNowIntent(this))
-                        }
+                        },
+                        onCancelBlocker = { homeVm.cancelBlocker() }
                     )
                 }
             }

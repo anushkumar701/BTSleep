@@ -62,6 +62,7 @@ fun HomeScreen(
     onCancelTimer: () -> Unit,
     onExtendTimer: () -> Unit,
     onDisconnectNow: () -> Unit = {},
+    onCancelBlocker: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val state    by homeVm.state.collectAsStateWithLifecycle()
@@ -131,6 +132,10 @@ fun HomeScreen(
                 onDisconnectNow = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onDisconnectNow()
+                },
+                onCancelBlocker = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onCancelBlocker()
                 }
             )
 
@@ -148,7 +153,7 @@ fun HomeScreen(
 
             // ── Main Dial OR Countdown Ring ────────────────────────────────
             if (!isActive) {
-                DialTimerSelector(
+                SimpleTimerSelector(
                     minutes   = state.selectedMinutes,
                     onMinutes = { homeVm.setMinutes(it) },
                     haptic    = haptic
@@ -200,143 +205,106 @@ fun HomeScreen(
     }
 }
 
-// ── Dial Timer Selector ────────────────────────────────────────────────────────
+// ── Simple Timer Selector (Replaced Dial for Better UX) ─────────────────────────
 @Composable
-private fun DialTimerSelector(
+private fun SimpleTimerSelector(
     minutes: Long,
     onMinutes: (Long) -> Unit,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback
 ) {
-    val fraction = ((minutes - DIAL_MIN_MIN).toFloat() / (DIAL_MAX_MIN - DIAL_MIN_MIN).toFloat()).coerceIn(0f, 1f)
-    val sweepAngle = fraction * DIAL_SWEEP
-
-    var lastSnapped by remember { mutableStateOf(minutes) }
-    var centerPx by remember { mutableStateOf(Offset.Zero) }
-    var sizePx   by remember { mutableStateOf(0f) }
-
-    val dialSize = 290.dp
-
-    Box(
-        modifier = Modifier.size(dialSize),
-        contentAlignment = Alignment.Center
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .drawWithCache {
-                    val stroke = Stroke(width = 24f, cap = StrokeCap.Round)
-                    val inset  = 24f / 2f
-                    val arcRect = Size(size.width - inset * 2, size.height - inset * 2)
-                    val topLeft = Offset(inset, inset)
-                    centerPx = Offset(size.width / 2f, size.height / 2f)
-                    sizePx   = size.width / 2f - inset
+        // Large Time Display with +/- buttons
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            // Minus Button
+            IconButton(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onMinutes((minutes - 5).coerceAtLeast(5))
+                },
+                modifier = Modifier
+                    .size(64.dp)
+                    .background(SpaceSurface2, CircleShape)
+            ) {
+                Icon(Icons.Rounded.Remove, contentDescription = "Decrease", tint = TextPrimary, modifier = Modifier.size(32.dp))
+            }
+            
+            Spacer(Modifier.width(28.dp))
+            
+            // Time Text
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(180.dp)) {
+                val h = minutes / 60L
+                val m = minutes % 60L
+                val timeStr = if (h > 0) {
+                    if (m > 0) "${h}h ${m}m" else "${h}h"
+                } else "${m}m"
+                
+                Text(
+                    text = timeStr,
+                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 52.sp),
+                    fontWeight = FontWeight.Black,
+                    color = TextPrimary,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "SLEEP TIMER DURATION",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AccentBlue,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp
+                )
+            }
+            
+            Spacer(Modifier.width(28.dp))
+            
+            // Plus Button
+            IconButton(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onMinutes((minutes + 5).coerceAtMost(120))
+                },
+                modifier = Modifier
+                    .size(64.dp)
+                    .background(SpaceSurface2, CircleShape)
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = "Increase", tint = TextPrimary, modifier = Modifier.size(32.dp))
+            }
+        }
 
-                    onDrawBehind {
-                        // Track
-                        drawArc(
-                            color = SpaceSurface2,
-                            startAngle = DIAL_START_ANGLE,
-                            sweepAngle = DIAL_SWEEP,
-                            useCenter  = false,
-                            topLeft    = topLeft,
-                            size       = arcRect,
-                            style      = stroke
+        Spacer(Modifier.height(40.dp))
+
+        // Quick Presets
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            listOf(15L, 30L, 45L, 60L, 120L).forEach { preset ->
+                val selected = minutes == preset
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (selected) AccentBlue else SpaceSurface2,
+                            RoundedCornerShape(12.dp)
                         )
-                        // Filled Arc (Cyan to Purple Gradient)
-                        if (sweepAngle > 0f) {
-                            drawArc(
-                                brush = Brush.sweepGradient(
-                                    listOf(AccentBlue, AccentCyan, AccentPurple)
-                                ),
-                                startAngle = DIAL_START_ANGLE,
-                                sweepAngle = sweepAngle,
-                                useCenter  = false,
-                                topLeft    = topLeft,
-                                size       = arcRect,
-                                style      = stroke
-                            )
-                            // Glowing Thumb Knob
-                            val thumbAngleRad = Math.toRadians((DIAL_START_ANGLE + sweepAngle).toDouble())
-                            val r = sizePx
-                            val thumbX = centerPx.x + r * cos(thumbAngleRad).toFloat()
-                            val thumbY = centerPx.y + r * sin(thumbAngleRad).toFloat()
-                            drawCircle(color = Color.White, radius = 16f, center = Offset(thumbX, thumbY))
-                            drawCircle(color = AccentBlue,  radius = 10f, center = Offset(thumbX, thumbY))
-                        }
-                    }
-                }
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { _ ->
-                            centerPx = Offset(size.width / 2f, size.height / 2f)
-                            sizePx   = size.width / 2f - 12f
-                        }
-                    ) { change, _ ->
-                        change.consume()
-                        val dx = change.position.x - centerPx.x
-                        val dy = change.position.y - centerPx.y
-                        val angleRaw = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
-                        val dialAngle = angleToDial(angleRaw.toFloat())
-                        val frac      = dialAngle / DIAL_SWEEP
-                        val snapped   = fractionToMinutes(frac)
-                        if (snapped != lastSnapped) {
-                            lastSnapped = snapped
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onMinutes(preset)
                         }
-                        onMinutes(snapped)
-                    }
-                }
-        )
-
-        // Center Time Text Display
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            val h = minutes / 60L
-            val m = minutes % 60L
-            val timeStr = if (h > 0) {
-                if (m > 0) "${h}h ${m}m" else "${h}h"
-            } else "${m}m"
-
-            Text(
-                text = timeStr,
-                style = MaterialTheme.typography.displayMedium.copy(fontSize = 44.sp),
-                fontWeight = FontWeight.Black,
-                color = TextPrimary,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = "SLEEP TIMER DURATION",
-                style = MaterialTheme.typography.labelSmall,
-                color = AccentBlue,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.5.sp
-            )
-            Spacer(Modifier.height(14.dp))
-
-            // Quick Preset Chips
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(15L, 30L, 45L, 60L, 90L).forEach { preset ->
-                    val selected = minutes == preset
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                if (selected) AccentBlue else SpaceSurface2,
-                                RoundedCornerShape(12.dp)
-                            )
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onMinutes(preset)
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = if (preset >= 60) "${preset / 60}h" else "${preset}m",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) TextOnAccent else TextSecondary
-                        )
-                    }
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = if (preset >= 60) "${preset / 60}h" + (if (preset%60 > 0) " ${preset%60}m" else "") else "${preset}m",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (selected) TextOnAccent else TextSecondary
+                    )
                 }
             }
         }
@@ -401,7 +369,8 @@ private fun StatusCard(
     btEnabled: Boolean,
     blockerActive: Boolean,
     clockText: String,
-    onDisconnectNow: () -> Unit
+    onDisconnectNow: () -> Unit,
+    onCancelBlocker: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -438,8 +407,24 @@ private fun StatusCard(
         }
 
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Quick Emergency Disconnect Button right in header
-            if (isConnected || blockerActive) {
+            // Action Button
+            if (blockerActive) {
+                Box(
+                    modifier = Modifier
+                        .background(ConnectedGreen.copy(0.15f), RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onCancelBlocker() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        "ALLOW RECONNECT",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ConnectedGreen,
+                        fontSize = 10.sp
+                    )
+                }
+            } else if (isConnected) {
                 Box(
                     modifier = Modifier
                         .background(ErrorRed.copy(0.15f), RoundedCornerShape(12.dp))

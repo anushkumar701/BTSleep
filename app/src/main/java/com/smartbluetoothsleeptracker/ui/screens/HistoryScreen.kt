@@ -5,7 +5,6 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartbluetoothsleeptracker.data.db.SessionEntity
-import com.smartbluetoothsleeptracker.ui.components.GlassCard
 import com.smartbluetoothsleeptracker.ui.theme.*
 import com.smartbluetoothsleeptracker.viewmodel.DeviceStat
 import com.smartbluetoothsleeptracker.viewmodel.HistoryTab
@@ -49,7 +47,7 @@ fun HistoryScreen(
     if (showClearAllDialog) {
         AlertDialog(
             onDismissRequest = { showClearAllDialog = false },
-            containerColor = SpaceSurface,
+            containerColor = SpaceSurfaceHigh,
             title = { Text("Clear All History?", color = TextPrimary, fontWeight = FontWeight.Bold) },
             text  = { Text("This permanently deletes all session records.", color = TextSecondary) },
             confirmButton = {
@@ -68,11 +66,11 @@ fun HistoryScreen(
     LazyColumn(
         modifier = modifier.fillMaxSize().background(DeepSpace),
         contentPadding = PaddingValues(
-            top = WindowInsets.systemBars.asPaddingValues().calculateTopPadding() + 16.dp,
-            bottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 16.dp,
-            start = 20.dp, end = 20.dp
+            top = WindowInsets.systemBars.asPaddingValues().calculateTopPadding() + 20.dp,
+            bottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 24.dp,
+            start = 24.dp, end = 24.dp
         ),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         // ── Header ──────────────────────────────────────────────────────────
         item {
@@ -80,14 +78,18 @@ fun HistoryScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
                 Column {
-                    Text("History", style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("History", style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Black, color = TextPrimary)
+                    Spacer(Modifier.height(4.dp))
                     Text("Your Bluetooth session log",
-                        style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                 }
                 if (state.totalSessions > 0) {
-                    IconButton(onClick = { showClearAllDialog = true }) {
-                        Icon(Icons.Rounded.DeleteSweep, null, tint = TextTertiary)
+                    IconButton(
+                        onClick = { showClearAllDialog = true },
+                        modifier = Modifier.background(ErrorRed.copy(0.1f), CircleShape)
+                    ) {
+                        Icon(Icons.Rounded.DeleteSweep, "Clear all", tint = ErrorRed)
                     }
                 }
             }
@@ -102,30 +104,31 @@ fun HistoryScreen(
         item {
             Row(
                 modifier = Modifier.fillMaxWidth()
-                    .background(SpaceSurface, RoundedCornerShape(14.dp))
-                    .padding(4.dp),
+                    .background(SpaceSurface, RoundedCornerShape(16.dp))
+                    .padding(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 HistoryTab.values().forEach { tab ->
                     val selected = state.selectedTab == tab
                     val label = when (tab) {
                         HistoryTab.TODAY -> "Today"
-                        HistoryTab.WEEK  -> "This Week"
-                        HistoryTab.MONTH -> "This Month"
+                        HistoryTab.WEEK  -> "Week"
+                        HistoryTab.MONTH -> "Month"
                     }
                     Box(
                         modifier = Modifier.weight(1f)
                             .background(
                                 if (selected) AccentBlue else Color.Transparent,
-                                RoundedCornerShape(10.dp)
+                                RoundedCornerShape(12.dp)
                             )
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable { viewModel.setTab(tab) }
-                            .padding(vertical = 10.dp),
+                            .padding(vertical = 12.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(label,
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
                             color = if (selected) Color.White else TextSecondary)
                     }
                 }
@@ -139,28 +142,10 @@ fun HistoryScreen(
                 HistoryTab.WEEK  -> state.weekTotal
                 HistoryTab.MONTH -> state.monthTotal
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                GlassCard(modifier = Modifier.weight(1f).padding(0.dp)) {
-                    Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(formatDuration(totalForTab), style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold, color = AccentBlue)
-                        Text("Total", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                    }
-                }
-                GlassCard(modifier = Modifier.weight(1f).padding(0.dp)) {
-                    Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("${state.sessions.size}", style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold, color = AccentBlue)
-                        Text("Sessions", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                    }
-                }
-                GlassCard(modifier = Modifier.weight(1f).padding(0.dp)) {
-                    Column(Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("${state.deviceStats.size}", style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold, color = AccentBlue)
-                        Text("Devices", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                    }
-                }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatCard(Modifier.weight(1.2f), "Total Time", formatDuration(totalForTab))
+                StatCard(Modifier.weight(1f), "Sessions", "${state.sessions.size}")
+                StatCard(Modifier.weight(1f), "Devices", "${state.deviceStats.size}")
             }
         }
 
@@ -168,44 +153,59 @@ fun HistoryScreen(
         if (state.sessions.isEmpty()) {
             item {
                 Box(
-                    modifier = Modifier.fillMaxWidth().padding(top = 24.dp)
+                    modifier = Modifier.fillMaxWidth().padding(top = 32.dp)
                         .background(SpaceSurface, RoundedCornerShape(24.dp))
-                        .padding(44.dp),
+                        .padding(vertical = 56.dp, horizontal = 32.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.Bedtime, null, tint = AccentBlue.copy(0.4f),
-                            modifier = Modifier.size(48.dp))
-                        Spacer(Modifier.height(12.dp))
-                        Text("No sessions in this period", color = TextSecondary,
-                            style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+                        Icon(Icons.Rounded.History, null, tint = AccentBlue.copy(0.3f),
+                            modifier = Modifier.size(64.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text("No sessions in this period", color = TextPrimary,
+                            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Text("Your sleep timer history will appear here.", color = TextSecondary,
+                            style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
                     }
                 }
             }
         } else {
             // ── By Device ───────────────────────────────────────────────────
             item {
-                Text("BY DEVICE", style = MaterialTheme.typography.labelSmall,
-                    color = TextTertiary,
-                    letterSpacing = androidx.compose.ui.unit.TextUnit(1.5f, androidx.compose.ui.unit.TextUnitType.Sp))
+                Text("DEVICES", style = MaterialTheme.typography.labelMedium,
+                    color = TextTertiary, fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp)
             }
-            items(state.deviceStats, key = { it.deviceName }) { stat ->
+            items(state.deviceStats, key = { "dev_" + it.deviceName }) { stat ->
                 DeviceCard(stat = stat, onClick = { onDeviceClick(stat.deviceName) })
             }
 
             // ── Recent Sessions ──────────────────────────────────────────────
-            item { Spacer(Modifier.height(4.dp)) }
+            item { Spacer(Modifier.height(8.dp)) }
             item {
-                Text("RECENT SESSIONS", style = MaterialTheme.typography.labelSmall,
-                    color = TextTertiary,
-                    letterSpacing = androidx.compose.ui.unit.TextUnit(1.5f, androidx.compose.ui.unit.TextUnitType.Sp))
+                Text("RECENT SESSIONS", style = MaterialTheme.typography.labelMedium,
+                    color = TextTertiary, fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp)
             }
             items(state.sessions, key = { it.id }) { session ->
-                SwipeToDeleteBox(onDelete = { viewModel.deleteSession(session.id) }) {
-                    SessionRow(session)
-                }
+                SessionRow(session, onDelete = { viewModel.deleteSession(session.id) })
             }
         }
+    }
+}
+
+@Composable
+private fun StatCard(modifier: Modifier, label: String, value: String) {
+    Column(
+        modifier = modifier
+            .background(SpaceSurface, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = TextPrimary)
+        Spacer(Modifier.height(6.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = TextSecondary, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -231,18 +231,18 @@ private fun WeeklyBarChart(allSessions: List<SessionEntity>) {
 
     Column(
         modifier = Modifier.fillMaxWidth()
-            .background(SpaceSurface, RoundedCornerShape(20.dp))
-            .padding(16.dp)
+            .background(SpaceSurface, RoundedCornerShape(24.dp))
+            .padding(20.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
-            Text("Last 7 Days", style = MaterialTheme.typography.titleSmall,
-                color = TextPrimary, fontWeight = FontWeight.SemiBold)
+            Text("Last 7 Days", style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary, fontWeight = FontWeight.Bold)
             Text("${days.sumOf { it.second }}m total",
-                style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                style = MaterialTheme.typography.labelMedium, color = TextSecondary, fontWeight = FontWeight.SemiBold)
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(24.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -250,7 +250,7 @@ private fun WeeklyBarChart(allSessions: List<SessionEntity>) {
             verticalAlignment = Alignment.Bottom
         ) {
             days.forEach { (label, minutes, isToday) ->
-                val frac = (minutes / maxMin.toFloat()).coerceIn(0.05f, 1f)
+                val frac = (minutes / maxMin.toFloat()).coerceIn(0.04f, 1f)
                 val barColor = when {
                     minutes > 120 -> ErrorRed
                     minutes > 60  -> Warning
@@ -263,30 +263,30 @@ private fun WeeklyBarChart(allSessions: List<SessionEntity>) {
                     // Value label
                     Text(if (minutes > 0) "${minutes}m" else "",
                         style = MaterialTheme.typography.labelSmall, color = barColor,
-                        fontSize = 9.sp)
-                    Spacer(Modifier.height(4.dp))
+                        fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    Spacer(Modifier.height(6.dp))
                     // Bar
                     Box(
                         modifier = Modifier
-                            .width(30.dp)
-                            .height((88 * animFrac).dp)
+                            .width(32.dp)
+                            .height((100 * animFrac).dp)
                             .background(
-                                Brush.verticalGradient(listOf(barColor, barColor.copy(0.6f))),
-                                RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
+                                Brush.verticalGradient(listOf(barColor, barColor.copy(0.4f))),
+                                RoundedCornerShape(8.dp)
                             )
                     )
-                    Spacer(Modifier.height(5.dp))
+                    Spacer(Modifier.height(8.dp))
                     // Day label
                     Text(label, style = MaterialTheme.typography.labelSmall,
                         color = if (isToday) AccentBlue else TextTertiary,
-                        fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 9.sp)
+                        fontWeight = if (isToday) FontWeight.Bold else FontWeight.SemiBold,
+                        fontSize = 11.sp)
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(16.dp))
         // Legend
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             LegendDot(AccentBlue, "≤ 1h")
             LegendDot(Warning, "1–2h")
             LegendDot(ErrorRed, "> 2h")
@@ -298,8 +298,8 @@ private fun WeeklyBarChart(allSessions: List<SessionEntity>) {
 private fun LegendDot(color: Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(8.dp).background(color, CircleShape))
-        Spacer(Modifier.width(4.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = TextSecondary, fontSize = 9.sp)
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = TextSecondary, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -312,70 +312,64 @@ private fun DeviceCard(stat: DeviceStat, onClick: () -> Unit) {
 
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(SpaceSurface, RoundedCornerShape(18.dp))
+            .background(SpaceSurface, RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
-            .padding(16.dp),
+            .padding(18.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(44.dp).background(AccentBlue.copy(0.12f), CircleShape),
+        Box(Modifier.size(48.dp).background(AccentBlue.copy(0.12f), CircleShape),
             contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.Headset, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
+            Icon(Icons.Rounded.Headphones, null, tint = AccentBlue, modifier = Modifier.size(24.dp))
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(stat.deviceName, style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold, color = TextPrimary)
+            Text(stat.deviceName, style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold, color = TextPrimary)
+            Spacer(Modifier.height(2.dp))
             Text("${stat.sessionCount} sessions · ${formatDuration(stat.totalDuration)}",
-                style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-            Spacer(Modifier.height(6.dp))
-            Box(Modifier.fillMaxWidth().height(4.dp).background(SpaceSurface2, RoundedCornerShape(2.dp))) {
-                Box(Modifier.fillMaxWidth(frac).height(4.dp).background(AccentBlue, RoundedCornerShape(2.dp)))
+                style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Spacer(Modifier.height(10.dp))
+            Box(Modifier.fillMaxWidth().height(6.dp).background(SpaceSurface2, RoundedCornerShape(3.dp))) {
+                Box(Modifier.fillMaxWidth(frac).height(6.dp).background(AccentBlue, RoundedCornerShape(3.dp)))
             }
-        }
-        Spacer(Modifier.width(8.dp))
-        Icon(Icons.Rounded.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(20.dp))
-    }
-}
-
-// ── Session row with long-press delete ─────────────────────────────────────────
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun SwipeToDeleteBox(onDelete: () -> Unit, content: @Composable () -> Unit) {
-    var showDelete by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .combinedClickable(onClick = {}, onLongClick = { showDelete = !showDelete }),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(modifier = Modifier.weight(1f)) { content() }
-        AnimatedVisibility(visible = showDelete) {
-            IconButton(onClick = { onDelete(); showDelete = false }, modifier = Modifier.padding(start = 4.dp)) {
-                Icon(Icons.Rounded.Delete, null, tint = ErrorRed)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SessionRow(session: SessionEntity) {
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(SpaceSurface, RoundedCornerShape(14.dp))
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.size(40.dp).background(SpaceSurface2, CircleShape), contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.Headset, null, tint = TextSecondary, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(12.dp))
+        Icon(Icons.Rounded.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(24.dp))
+    }
+}
+
+// ── Session row with explicit delete button ─────────────────────────────────────────
+
+@Composable
+private fun SessionRow(session: SessionEntity, onDelete: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .background(SpaceSurface, RoundedCornerShape(16.dp))
+            .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(44.dp).background(SpaceSurface2, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.Bluetooth, null, tint = TextSecondary, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(session.deviceName, style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold, color = TextPrimary)
+            Text(session.deviceName, style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold, color = TextPrimary)
+            Spacer(Modifier.height(2.dp))
             Text(formatDate(session.startTime), style = MaterialTheme.typography.labelSmall, color = TextSecondary)
         }
-        Text(formatDuration(session.duration), style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold, color = AccentBlue)
+        Column(horizontalAlignment = Alignment.End) {
+            Text(formatDuration(session.duration), style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Black, color = AccentBlue)
+        }
+        Spacer(Modifier.width(8.dp))
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete", tint = TextTertiary, modifier = Modifier.size(20.dp))
+        }
     }
 }
 

@@ -82,6 +82,10 @@ class HomeViewModel(
         viewModelScope.launch { prefs.setSelectedMinutes(minutes) }
     }
 
+    fun cancelBlocker() {
+        btDisconnector.clearBlocker()
+    }
+
     private fun formatCountdown(millis: Long): String {
         val totalSec = (millis / 1000L).coerceAtLeast(0L)
         val h = totalSec / 3600L

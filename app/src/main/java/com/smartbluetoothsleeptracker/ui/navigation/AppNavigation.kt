@@ -40,7 +40,8 @@ fun AppNavigation(
     onStartTimer: (Long) -> Unit,
     onCancelTimer: () -> Unit,
     onExtendTimer: () -> Unit,
-    onDisconnectNow: () -> Unit
+    onDisconnectNow: () -> Unit,
+    onCancelBlocker: () -> Unit
 ) {
     val navController = rememberNavController()
 
@@ -103,7 +104,8 @@ fun AppNavigation(
                     onStartTimer = onStartTimer,
                     onCancelTimer = onCancelTimer,
                     onExtendTimer = onExtendTimer,
-                    onDisconnectNow = onDisconnectNow
+                    onDisconnectNow = onDisconnectNow,
+                    onCancelBlocker = onCancelBlocker
                 )
             }
             composable(Screen.History.route) {
