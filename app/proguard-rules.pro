@@ -16,3 +16,17 @@
 -keepattributes *Annotation*
 -keepattributes EnclosingMethod,InnerClasses
 -keepattributes SourceFile,LineNumberTable
+
+# Bluetooth Reflection & Profile Proxy Safety
+-dontwarn android.bluetooth.**
+-keepclassmembers class android.bluetooth.BluetoothDevice {
+    public boolean disconnect();
+    public boolean isConnected();
+}
+-keepclassmembers class android.bluetooth.BluetoothProfile {
+    public boolean disconnect(android.bluetooth.BluetoothDevice);
+}
+
+# ViewModels & Data Classes
+-keep class com.smartbluetoothsleeptracker.viewmodel.** { *; }
+-keep class com.smartbluetoothsleeptracker.data.prefs.AppSettings { *; }

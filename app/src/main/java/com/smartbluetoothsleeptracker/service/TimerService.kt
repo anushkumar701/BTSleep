@@ -172,101 +172,103 @@ class TimerService : Service() {
         Log.i(TAG, "Timer expired — executing expiry sequence")
 
         scope.launch {
-            val settings = app.prefs.settings.first()
+            try {
+                val settings = app.prefs.settings.first()
 
-            // ── STEP 1: Playback Stop (volume fade) ────────────────────
-            if (settings.playbackStopEnabled) {
-                Log.i(TAG, "Step 1: Fading out playback over ${settings.fadeOutDurationSeconds}s")
-                val fadeResult = app.playbackController.fadeOutAndStop(settings.fadeOutDurationSeconds)
+                // ── STEP 1: Playback Stop (volume fade) ────────────────────
+                if (settings.playbackStopEnabled) {
+                    Log.i(TAG, "Step 1: Fading out playback over ${settings.fadeOutDurationSeconds}s")
+                    val fadeResult = app.playbackController.fadeOutAndStop(settings.fadeOutDurationSeconds)
 
-                if (fadeResult == FadeResult.CANCELLED_BY_USER) {
-                    Log.i(TAG, "Fade cancelled by volume key — extending timer, skipping disconnect")
-                    // Same as tapping notification Extend
-                    performExtend()
-                    return@launch
+                    if (fadeResult == FadeResult.CANCELLED_BY_USER) {
+                        Log.i(TAG, "Fade cancelled by volume key — extending timer, skipping disconnect")
+                        // Same as tapping notification Extend
+                        performExtend()
+                        return@launch
+                    }
+                    // COMPLETED or DISABLED → continue to step 2
                 }
-                // COMPLETED or DISABLED → continue to step 2
-            }
 
-            // ── STEP 2: Bluetooth Disconnect ───────────────────────────
-            Log.i(TAG, "Step 2: Bluetooth disconnect")
-            val adapter = android.bluetooth.BluetoothManager::class.java
-                .let { getSystemService(it) }?.adapter
+                // ── STEP 2: Bluetooth Disconnect ───────────────────────────
+                Log.i(TAG, "Step 2: Bluetooth disconnect")
+                val adapter = android.bluetooth.BluetoothManager::class.java
+                    .let { getSystemService(it) }?.adapter
 
-            val btDevices = mutableListOf<BluetoothDevice>()
-            adapter?.bondedDevices?.forEach { dev ->
-                if (dev.address in targetAddresses) btDevices.add(dev)
-            }
+                val btDevices = mutableListOf<BluetoothDevice>()
+                adapter?.bondedDevices?.forEach { dev ->
+                    if (dev.address in targetAddresses) btDevices.add(dev)
+                }
 
-            val result = if (btDevices.isNotEmpty()) {
-                app.disconnector.disconnectDevices(
-                    devices = btDevices,
-                    cooldownSeconds = if (settings.reconnectBlockerEnabled) settings.cooldownSeconds else 0,
-                    enableCooldown = settings.reconnectBlockerEnabled
-                )
-            } else {
-                DisconnectResult(true, null, emptyList())
-            }
+                val result = if (btDevices.isNotEmpty()) {
+                    app.disconnector.disconnectDevices(
+                        devices = btDevices,
+                        cooldownSeconds = if (settings.reconnectBlockerEnabled) settings.cooldownSeconds else 0,
+                        enableCooldown = settings.reconnectBlockerEnabled
+                    )
+                } else {
+                    DisconnectResult(true, null, emptyList())
+                }
 
-            // ── STEP 3: Screen Off ─────────────────────────────────────
-            if (settings.screenOffEnabled) {
-                Log.i(TAG, "Step 3: Screen off (lockNow)")
-                app.screenController.lockScreen()
-            }
+                // ── STEP 3: Screen Off ─────────────────────────────────────
+                if (settings.screenOffEnabled) {
+                    Log.i(TAG, "Step 3: Screen off (lockNow)")
+                    app.screenController.lockScreen()
+                }
 
-            // ── Session & Usage Bookkeeping ────────────────────────────
-            val startTime = endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L
-            val actualMin = ((System.currentTimeMillis() - startTime) / 60_000L).toInt()
-            app.db.sessionDao().update(
-                SessionEntity(
-                    id = sessionId,
-                    deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
-                    deviceName = getDeviceName(targetAddresses.firstOrNull()),
-                    startTime = startTime,
-                    endTime = System.currentTimeMillis(),
-                    plannedDurationMin = plannedMinutes,
-                    actualDurationMin = actualMin,
-                    disconnectConfirmed = result.success,
-                    extendedMinutes = extendedMinutes,
-                    date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-                )
-            )
-
-            val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-            for (addr in targetAddresses) {
-                val existing = app.db.dailyUsageDao().getForDate(today)
-                    .find { it.deviceAddress == addr }
-                app.db.dailyUsageDao().upsert(
-                    DailyUsageEntity(
-                        date = today,
-                        deviceAddress = addr,
-                        totalMinutes = (existing?.totalMinutes ?: 0) + actualMin,
-                        sessionCount = (existing?.sessionCount ?: 0) + 1
+                // ── Session & Usage Bookkeeping ────────────────────────────
+                val startTime = endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L
+                val actualMin = ((System.currentTimeMillis() - startTime) / 60_000L).toInt()
+                app.db.sessionDao().update(
+                    SessionEntity(
+                        id = sessionId,
+                        deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
+                        deviceName = getDeviceName(targetAddresses.firstOrNull()),
+                        startTime = startTime,
+                        endTime = System.currentTimeMillis(),
+                        plannedDurationMin = plannedMinutes,
+                        actualDurationMin = actualMin,
+                        disconnectConfirmed = result.success,
+                        extendedMinutes = extendedMinutes,
+                        date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                     )
                 )
+
+                val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                for (addr in targetAddresses) {
+                    val existing = app.db.dailyUsageDao().getForDate(today)
+                        .find { it.deviceAddress == addr }
+                    app.db.dailyUsageDao().upsert(
+                        DailyUsageEntity(
+                            date = today,
+                            deviceAddress = addr,
+                            totalMinutes = (existing?.totalMinutes ?: 0) + actualMin,
+                            sessionCount = (existing?.sessionCount ?: 0) + 1
+                        )
+                    )
+                }
+
+                // Notify result
+                val nm = getSystemService(android.app.NotificationManager::class.java)
+                nm.cancel(AppNotifications.NOTIF_WARNING)
+                nm.notify(
+                    AppNotifications.NOTIF_DISCONNECT_RESULT,
+                    AppNotifications.disconnectResultNotification(
+                        this@TimerService, result.success,
+                        getDeviceName(targetAddresses.firstOrNull())
+                    ).build()
+                )
+
+                // Start cooldown ticking if active
+                if (settings.reconnectBlockerEnabled && settings.cooldownSeconds > 0) {
+                    startCooldownTick()
+                }
+
+                app.prefs.clearTimer()
+            } finally {
+                releaseWakeLock()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                sendBroadcast(Intent("com.sleepbt.TIMER_END").setPackage(packageName))
             }
-
-            // Notify result
-            val nm = getSystemService(android.app.NotificationManager::class.java)
-            nm.cancel(AppNotifications.NOTIF_WARNING)
-            nm.notify(
-                AppNotifications.NOTIF_DISCONNECT_RESULT,
-                AppNotifications.disconnectResultNotification(
-                    this@TimerService, result.success,
-                    getDeviceName(targetAddresses.firstOrNull())
-                ).build()
-            )
-
-            // Start cooldown ticking if active
-            if (settings.reconnectBlockerEnabled && settings.cooldownSeconds > 0) {
-                startCooldownTick()
-            }
-
-            app.prefs.clearTimer()
-            releaseWakeLock()
-
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            sendBroadcast(Intent("com.sleepbt.TIMER_END").setPackage(packageName))
         }
     }
 
