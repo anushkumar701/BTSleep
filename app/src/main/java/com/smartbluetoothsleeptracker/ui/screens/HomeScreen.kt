@@ -49,6 +49,12 @@ fun HomeScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
+    val hapticEnabled = state.settings.hapticFeedbackEnabled
+
+    // Helper to conditionally perform haptic feedback
+    fun doHaptic(type: HapticFeedbackType = HapticFeedbackType.LongPress) {
+        if (hapticEnabled) haptic.performHapticFeedback(type)
+    }
 
     Column(
         modifier = modifier
@@ -89,7 +95,8 @@ fun HomeScreen(
             RotaryDial(
                 minutes = state.selectedMinutes,
                 onMinutesChange = { viewModel.setMinutes(it) },
-                haptic = haptic
+                haptic = haptic,
+                hapticEnabled = hapticEnabled
             )
         }
 
@@ -103,7 +110,7 @@ fun HomeScreen(
             ) {
                 OutlinedButton(
                     onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        doHaptic()
                         viewModel.cancelTimer()
                     },
                     modifier = Modifier.weight(1f).height(56.dp),
@@ -117,7 +124,7 @@ fun HomeScreen(
                 }
                 Button(
                     onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        doHaptic()
                         viewModel.extendTimer()
                     },
                     modifier = Modifier.weight(1f).height(56.dp),
@@ -132,7 +139,7 @@ fun HomeScreen(
         } else {
             Button(
                 onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    doHaptic()
                     viewModel.startTimer()
                 },
                 enabled = state.connectedDevices.isNotEmpty() && state.btEnabled,
@@ -324,7 +331,8 @@ private fun CountdownDisplay(remainingMs: Long) {
 private fun RotaryDial(
     minutes: Long,
     onMinutesChange: (Long) -> Unit,
-    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    hapticEnabled: Boolean = true
 ) {
     val fraction = ((minutes - MIN_MIN).toFloat() / (MAX_MIN - MIN_MIN).toFloat()).coerceIn(0f, 1f)
     val sweepAngle = fraction * DIAL_SWEEP
@@ -383,7 +391,7 @@ private fun RotaryDial(
                             val snapped = (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
                             if (snapped != lastSnapped) {
                                 lastSnapped = snapped
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             }
                             onMinutesChange(snapped)
                         }
@@ -426,7 +434,7 @@ private fun RotaryDial(
                         )
                         .clip(RoundedCornerShape(12.dp))
                         .clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onMinutesChange(preset)
                         }
                         .padding(horizontal = 12.dp, vertical = 8.dp)

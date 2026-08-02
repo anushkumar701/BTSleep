@@ -11,7 +11,10 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.smartbluetoothsleeptracker.BTCurfewApp
+import com.smartbluetoothsleeptracker.core.bluetooth.DisconnectResult
 import com.smartbluetoothsleeptracker.core.notification.AppNotifications
+import com.smartbluetoothsleeptracker.core.playback.FadeResult
+import com.smartbluetoothsleeptracker.data.db.DailyUsageEntity
 import com.smartbluetoothsleeptracker.data.db.SessionEntity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -161,16 +164,39 @@ class TimerService : Service() {
         }
     }
 
+    /**
+     * EXPIRY SEQUENCE (ordered):
+     * 1. Playback stop (volume fade)
+     * 2. Bluetooth disconnect
+     * 3. Wifi off
+     * 4. Screen off
+     */
     @SuppressLint("MissingPermission")
     private fun onTimerExpired() {
-        Log.i(TAG, "Timer expired — disconnecting")
+        Log.i(TAG, "Timer expired — executing expiry sequence")
 
         scope.launch {
             val settings = app.prefs.settings.first()
+
+            // ── STEP 1: Playback Stop (volume fade) ────────────────────
+            if (settings.playbackStopEnabled) {
+                Log.i(TAG, "Step 1: Fading out playback over ${settings.fadeOutDurationSeconds}s")
+                val fadeResult = app.playbackController.fadeOutAndStop(settings.fadeOutDurationSeconds)
+
+                if (fadeResult == FadeResult.CANCELLED_BY_USER) {
+                    Log.i(TAG, "Fade cancelled by volume key — extending timer, skipping disconnect")
+                    // Same as tapping notification Extend
+                    performExtend()
+                    return@launch
+                }
+                // COMPLETED or DISABLED → continue to step 2
+            }
+
+            // ── STEP 2: Bluetooth Disconnect ───────────────────────────
+            Log.i(TAG, "Step 2: Bluetooth disconnect")
             val adapter = android.bluetooth.BluetoothManager::class.java
                 .let { getSystemService(it) }?.adapter
 
-            // Find target BT devices
             val btDevices = mutableListOf<BluetoothDevice>()
             adapter?.bondedDevices?.forEach { dev ->
                 if (dev.address in targetAddresses) btDevices.add(dev)
@@ -183,18 +209,30 @@ class TimerService : Service() {
                     enableCooldown = settings.reconnectBlockerEnabled
                 )
             } else {
-                // Device already disconnected manually
-                com.smartbluetoothsleeptracker.core.bluetooth.DisconnectResult(true, null, emptyList())
+                DisconnectResult(true, null, emptyList())
             }
 
-            // Update session
-            val actualMin = ((System.currentTimeMillis() - (endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L)) / 60_000L).toInt()
+            // ── STEP 3: Wifi Off ───────────────────────────────────────
+            if (settings.wifiOffEnabled) {
+                Log.i(TAG, "Step 3: Wifi off")
+                app.wifiController.disableWifi(useShizuku = settings.shizukuEnabled)
+            }
+
+            // ── STEP 4: Screen Off ─────────────────────────────────────
+            if (settings.screenOffEnabled) {
+                Log.i(TAG, "Step 4: Screen off (lockNow)")
+                app.screenController.lockScreen()
+            }
+
+            // ── Session & Usage Bookkeeping ────────────────────────────
+            val startTime = endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L
+            val actualMin = ((System.currentTimeMillis() - startTime) / 60_000L).toInt()
             app.db.sessionDao().update(
                 SessionEntity(
                     id = sessionId,
                     deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
                     deviceName = getDeviceName(targetAddresses.firstOrNull()),
-                    startTime = endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L,
+                    startTime = startTime,
                     endTime = System.currentTimeMillis(),
                     plannedDurationMin = plannedMinutes,
                     actualDurationMin = actualMin,
@@ -204,13 +242,12 @@ class TimerService : Service() {
                 )
             )
 
-            // Update daily usage
             val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
             for (addr in targetAddresses) {
                 val existing = app.db.dailyUsageDao().getForDate(today)
                     .find { it.deviceAddress == addr }
                 app.db.dailyUsageDao().upsert(
-                    com.smartbluetoothsleeptracker.data.db.DailyUsageEntity(
+                    DailyUsageEntity(
                         date = today,
                         deviceAddress = addr,
                         totalMinutes = (existing?.totalMinutes ?: 0) + actualMin,
@@ -238,10 +275,7 @@ class TimerService : Service() {
             app.prefs.clearTimer()
             releaseWakeLock()
 
-            // Stop foreground but keep notification briefly
             stopForeground(STOP_FOREGROUND_REMOVE)
-
-            // Broadcast timer end for UI
             sendBroadcast(Intent("com.btcurfew.TIMER_END").setPackage(packageName))
         }
     }
@@ -249,7 +283,6 @@ class TimerService : Service() {
     private fun cancelTimer() {
         tickJob?.cancel()
         scope.launch {
-            // Mark session as ended early
             if (sessionId > 0) {
                 val existing = app.db.sessionDao().getOrphanedSession()
                 if (existing != null) {
@@ -270,21 +303,31 @@ class TimerService : Service() {
     }
 
     private fun extendTimer() {
-        scope.launch {
-            val settings = app.prefs.settings.first()
-            val addMs = settings.extendMinutes * 60_000L
-            endTimeMillis += addMs
-            extendedMinutes += settings.extendMinutes
-            warningFired = false
+        scope.launch { performExtend() }
+    }
 
-            app.prefs.setTimerEnd(endTimeMillis)
-            app.prefs.setTimerExtended(extendedMinutes)
+    /**
+     * Shared extend logic — used by notification Extend button AND playback fade cancel.
+     */
+    private suspend fun performExtend() {
+        val settings = app.prefs.settings.first()
+        val addMs = settings.extendMinutes * 60_000L
+        endTimeMillis += addMs
+        extendedMinutes += settings.extendMinutes
+        warningFired = false
 
-            val nm = getSystemService(android.app.NotificationManager::class.java)
-            nm.cancel(AppNotifications.NOTIF_WARNING)
+        app.prefs.setTimerEnd(endTimeMillis)
+        app.prefs.setTimerExtended(extendedMinutes)
 
-            Log.i(TAG, "Extended by ${settings.extendMinutes}m")
+        // Restart tick loop if it was stopped
+        if (tickJob?.isActive != true) {
+            startTickLoop()
         }
+
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        nm.cancel(AppNotifications.NOTIF_WARNING)
+
+        Log.i(TAG, "Extended by ${settings.extendMinutes}m (total extended: ${extendedMinutes}m)")
     }
 
     private fun endNow() {

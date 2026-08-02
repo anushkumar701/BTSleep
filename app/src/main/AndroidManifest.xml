@@ -15,6 +15,10 @@
     <!-- Battery exemption (so OEM killers don't murder the timer service) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Wifi state (for wifi-off feature) -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
@@ -38,12 +42,24 @@
             </intent-filter>
         </activity>
 
+        <!-- Timer foreground service -->
         <service
             android:name=".service.TimerService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!-- Notification Listener (required for MediaSessionManager.getActiveSessions) -->
+        <service
+            android:name=".service.MediaListenerService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Bluetooth state receiver -->
         <receiver
             android:name=".receiver.BluetoothReceiver"
             android:enabled="true"
@@ -56,7 +72,20 @@
             </intent-filter>
         </receiver>
 
-        <!-- Shizuku provider for privileged BT control -->
+        <!-- Device Admin receiver (for lockNow / screen-off) -->
+        <receiver
+            android:name=".core.screen.BTCurfewDeviceAdmin"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Shizuku provider for privileged BT/Wifi control -->
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
