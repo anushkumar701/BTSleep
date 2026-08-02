@@ -254,17 +254,16 @@ private fun ConnectionStatusBar(
 
 @Composable
 private fun CooldownBanner(expiresAt: Long, onAllowReconnect: () -> Unit) {
-    var currentTime by remember(expiresAt) { mutableStateOf(System.currentTimeMillis()) }
-
-    LaunchedEffect(expiresAt) {
+    val remainingSeconds by produceState(
+        initialValue = ((expiresAt - System.currentTimeMillis()).coerceAtLeast(0) + 999) / 1000,
+        key1 = expiresAt
+    ) {
         while (System.currentTimeMillis() < expiresAt) {
-            currentTime = System.currentTimeMillis()
-            kotlinx.coroutines.delay(500)
+            value = ((expiresAt - System.currentTimeMillis()).coerceAtLeast(0) + 999) / 1000
+            kotlinx.coroutines.delay(200)
         }
-        currentTime = System.currentTimeMillis()
+        value = 0L
     }
-
-    val remaining = ((expiresAt - currentTime).coerceAtLeast(0) + 999) / 1000
 
     Row(
         modifier = Modifier
@@ -278,7 +277,7 @@ private fun CooldownBanner(expiresAt: Long, onAllowReconnect: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text("Reconnect blocked", style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold, color = StatusOrange)
-            Text("${remaining}s remaining", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+            Text("${remainingSeconds}s remaining", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
         }
         Box(
             modifier = Modifier
