@@ -14,7 +14,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
-import com.smartbluetoothsleeptracker.service.MediaListenerService
 import kotlinx.coroutines.*
 
 /**
@@ -153,36 +152,6 @@ class PlaybackController(private val context: Context) {
             audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_STOP))
         } catch (e: Exception) {
             Log.w(TAG, "Media key dispatch failed: ${e.message}")
-        }
-
-        // 3. MediaSessionManager — pause all active sessions (requires Notification Listener)
-        pauseActiveMediaSessions()
-    }
-
-    /**
-     * Uses MediaSessionManager to fetch and pause all active media sessions.
-     * Only works if the user has granted Notification Listener access.
-     */
-    private fun pauseActiveMediaSessions() {
-        try {
-            val msm = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
-                ?: return
-            val componentName = ComponentName(context, MediaListenerService::class.java)
-            val sessions: List<MediaController> = msm.getActiveSessions(componentName)
-
-            for (session in sessions) {
-                try {
-                    session.transportControls.pause()
-                    Log.d(TAG, "Paused media session: ${session.packageName}")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to pause ${session.packageName}: ${e.message}")
-                }
-            }
-            Log.i(TAG, "Paused ${sessions.size} active media session(s)")
-        } catch (e: SecurityException) {
-            Log.d(TAG, "Notification Listener not granted — skipping MediaSession pause")
-        } catch (e: Exception) {
-            Log.w(TAG, "MediaSession pause error: ${e.message}")
         }
     }
 

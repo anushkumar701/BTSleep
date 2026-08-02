@@ -49,16 +49,6 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
-        <!-- Notification Listener (required for MediaSessionManager.getActiveSessions) -->
-        <service
-            android:name=".service.MediaListenerService"
-            android:exported="true"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
         <!-- Bluetooth state receiver -->
         <receiver
             android:name=".receiver.BluetoothReceiver"

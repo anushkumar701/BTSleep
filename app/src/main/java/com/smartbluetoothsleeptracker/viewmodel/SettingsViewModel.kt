@@ -15,7 +15,6 @@ import androidx.lifecycle.viewModelScope
 import com.smartbluetoothsleeptracker.SleepBTApp
 import com.smartbluetoothsleeptracker.core.screen.SleepBTDeviceAdmin
 import com.smartbluetoothsleeptracker.data.prefs.AppSettings
-import com.smartbluetoothsleeptracker.service.MediaListenerService
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -94,17 +93,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             settingsUri = "package:${ctx.packageName}"
         ))
 
-        // 4. Notification Listener
-        val enabledListeners = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners") ?: ""
-        val componentName = ComponentName(ctx, MediaListenerService::class.java).flattenToString()
-        list.add(PermissionStatus(
-            name = "Notification Listener",
-            description = "Pause active media sessions on timer end",
-            granted = enabledListeners.contains(componentName),
-            settingsAction = Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
-        ))
-
-        // 5. Device Admin
+        // 4. Device Admin
         list.add(PermissionStatus(
             name = "Device Admin",
             description = "Lock screen on timer expiry",
