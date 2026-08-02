@@ -88,9 +88,9 @@ fun HomeScreen(
 
         Spacer(Modifier.weight(1f))
 
-        // ── Main Content: Dial or Countdown ────────────────────────────
         if (state.isTimerRunning) {
-            CountdownDisplay(remainingMs = state.remainingMs)
+            val totalDurationMs = (state.settings.timerPlannedMinutes + state.settings.timerExtendedMinutes) * 60_000L
+            CountdownDisplay(remainingMs = state.remainingMs, totalDurationMs = totalDurationMs)
         } else {
             RotaryDial(
                 minutes = state.selectedMinutes,
@@ -282,21 +282,22 @@ private fun CooldownBanner(expiresAt: Long, onAllowReconnect: () -> Unit) {
 // ── Countdown Display ──────────────────────────────────────────────────
 
 @Composable
-private fun CountdownDisplay(remainingMs: Long) {
+private fun CountdownDisplay(remainingMs: Long, totalDurationMs: Long) {
     val totalSec = (remainingMs / 1000).coerceAtLeast(0)
     val h = totalSec / 3600
     val m = (totalSec % 3600) / 60
     val s = totalSec % 60
 
-    // Animated progress ring
-    val fraction = remember { Animatable(1f) }
+    val progressFraction = if (totalDurationMs > 0) {
+        (remainingMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f)
+    } else 1f
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier.size(280.dp),
             contentAlignment = Alignment.Center
         ) {
-            // Background ring
+            // Background & Progress ring
             Box(
                 Modifier.fillMaxSize().drawWithCache {
                     val stroke = Stroke(width = 12f, cap = StrokeCap.Round)
@@ -304,7 +305,20 @@ private fun CountdownDisplay(remainingMs: Long) {
                     val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
                     val topLeft = Offset(inset, inset)
                     onDrawBehind {
+                        // Gray background track
                         drawArc(Surface3, 0f, 360f, false, topLeft, arcSize, style = stroke)
+                        // Active colored sweep matching RotaryDial's styling (AccentBlue, AccentCyan, AccentPurple)
+                        if (progressFraction > 0f) {
+                            drawArc(
+                                brush = Brush.sweepGradient(listOf(AccentBlue, AccentCyan, AccentPurple)),
+                                startAngle = -90f, // start from the top
+                                sweepAngle = progressFraction * 360f,
+                                useCenter = false,
+                                topLeft = topLeft,
+                                size = arcSize,
+                                style = stroke
+                            )
+                        }
                     }
                 }
             )

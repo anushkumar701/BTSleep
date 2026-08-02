@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 /**
@@ -22,25 +24,28 @@ class WifiController(private val context: Context) {
     }
 
     /**
-     * Attempt to disable wifi.
+     * Attempt to disable wifi. Runs shell operations asynchronously on Dispatchers.IO.
      * @param useShizuku whether Shizuku is configured and should be tried first
      * @return true if wifi was disabled silently, false if system panel was launched
      */
-    fun disableWifi(useShizuku: Boolean): Boolean {
+    suspend fun disableWifi(useShizuku: Boolean): Boolean {
         if (useShizuku) {
             val silentSuccess = disableViaShell()
             if (silentSuccess) return true
         }
 
-        // Fallback: open system wifi panel
-        launchWifiPanel()
+        // Fallback: open system wifi panel (must run on Main/UI context)
+        withContext(Dispatchers.Main) {
+            launchWifiPanel()
+        }
         return false
     }
 
     /**
      * Tries to disable wifi via shell commands (works with root or Shizuku).
+     * Isolated to Dispatchers.IO to prevent main-thread blocking / ANRs.
      */
-    private fun disableViaShell(): Boolean {
+    private suspend fun disableViaShell(): Boolean = withContext(Dispatchers.IO) {
         val commands = listOf(
             arrayOf("cmd", "wifi", "set-wifi-enabled", "disabled"),
             arrayOf("svc", "wifi", "disable")
@@ -53,7 +58,7 @@ class WifiController(private val context: Context) {
                 process.destroyForcibly()
                 if (exited && process.exitValue() == 0) {
                     Log.i(TAG, "Wifi disabled via: ${cmd.joinToString(" ")}")
-                    return true
+                    return@withContext true
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Shell command failed: ${cmd.joinToString(" ")} — ${e.message}")
@@ -67,11 +72,11 @@ class WifiController(private val context: Context) {
             process.destroyForcibly()
             if (exited && process.exitValue() == 0) {
                 Log.i(TAG, "Wifi disabled via root")
-                return true
+                return@withContext true
             }
         } catch (_: Exception) {}
 
-        return false
+        false
     }
 
     /**
