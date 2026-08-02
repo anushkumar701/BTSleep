@@ -27,6 +27,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.smartbluetoothsleeptracker.R
 import com.smartbluetoothsleeptracker.BuildConfig
 import com.smartbluetoothsleeptracker.core.screen.BTCurfewDeviceAdmin
 import com.smartbluetoothsleeptracker.ui.theme.*
@@ -44,14 +47,25 @@ fun SettingsScreen(
     val s = state.settings
     val context = LocalContext.current
 
-    // Refresh permissions when screen becomes visible
-    LaunchedEffect(Unit) { viewModel.refreshStatus() }
+    // Refresh permissions when screen becomes visible or activity resumes
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshStatus()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(
-            top = WindowInsets.systemBars.asPaddingValues().calculateTopPadding() + 20.dp,
-            bottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 24.dp,
+            top = 20.dp,
+            bottom = 24.dp,
             start = 24.dp, end = 24.dp
         ),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -62,7 +76,7 @@ fun SettingsScreen(
                 Text("Settings", style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Black, color = TextPrimary)
                 Spacer(Modifier.height(4.dp))
-                Text("Configure BT Curfew", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                Text("Configure SleepBT", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                 Spacer(Modifier.height(16.dp))
             }
         }
@@ -157,17 +171,6 @@ fun SettingsScreen(
             }
         }
 
-        // ── WIFI OFF ───────────────────────────────────────────────────
-        item { Spacer(Modifier.height(8.dp)); SectionHeader("Wifi") }
-        item {
-            SettingToggle(
-                icon = Icons.Rounded.WifiOff,
-                title = "Disable Wifi on Timer End",
-                subtitle = if (state.shizukuAvailable) "Silent via Shizuku" else "Opens system Wifi panel",
-                checked = s.wifiOffEnabled,
-                onCheckedChange = { viewModel.setWifiOff(it) }
-            )
-        }
 
         // ── SCREEN OFF ─────────────────────────────────────────────────
         item { Spacer(Modifier.height(8.dp)); SectionHeader("Screen") }
@@ -187,7 +190,7 @@ fun SettingsScreen(
                         putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN,
                             BTCurfewDeviceAdmin.componentName(context))
                         putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                            "BT Curfew needs Device Admin to lock the screen when the sleep timer ends.")
+                            "SleepBT needs Device Admin to lock the screen when the sleep timer ends.")
                     }
                     context.startActivity(intent)
                 }
@@ -310,10 +313,16 @@ fun SettingsScreen(
                     .padding(16.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Info, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
+                    Image(
+                        painter = painterResource(id = R.mipmap.ic_launcher),
+                        contentDescription = "SleepBT Logo",
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                    )
                     Spacer(Modifier.width(14.dp))
                     Column {
-                        Text("BT Curfew", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("SleepBT", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary)
                         Text("v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     }
                 }
@@ -321,23 +330,11 @@ fun SettingsScreen(
                 HorizontalDivider(color = SurfaceBorder)
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "© 2026 Anush Kumar. All rights reserved.",
+                    "© 2026 DreamSync. All rights reserved.",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextTertiary
                 )
             }
-        }
-
-        // ── EXPIRY SEQUENCE INFO ───────────────────────────────────────
-        item {
-            Spacer(Modifier.height(8.dp))
-            InfoCard(
-                "On timer expiry, actions execute in order:\n" +
-                "1. Playback stop (volume fade)\n" +
-                "2. Bluetooth disconnect\n" +
-                "3. Wifi off\n" +
-                "4. Screen lock"
-            )
         }
 
         item { Spacer(Modifier.height(16.dp)) }

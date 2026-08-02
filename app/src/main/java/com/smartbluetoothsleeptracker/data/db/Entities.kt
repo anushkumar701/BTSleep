@@ -37,7 +37,8 @@ data class DisconnectAttemptEntity(
     val manufacturer: String,
     @ColumnInfo(name = "method_id") val methodId: String,
     val succeeded: Boolean,
-    @ColumnInfo(name = "last_tested_at") val lastTestedAt: Long
+    @ColumnInfo(name = "last_tested_at") val lastTestedAt: Long,
+    @ColumnInfo(name = "error_message") val errorMessage: String? = null
 )
 
 @Entity(

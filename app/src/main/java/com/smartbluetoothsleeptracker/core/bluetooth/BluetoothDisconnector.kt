@@ -3,6 +3,7 @@ package com.smartbluetoothsleeptracker.core.bluetooth
 import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.content.Context
+import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -15,6 +16,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 /**
@@ -23,7 +25,7 @@ import kotlin.coroutines.suspendCoroutine
 data class DisconnectMethod(
     val id: String,
     val displayName: String,
-    val execute: suspend (Context, BluetoothDevice) -> Boolean
+    val execute: suspend (Context, BluetoothDevice) -> Unit
 )
 
 data class CooldownState(
@@ -44,8 +46,7 @@ data class DisconnectResult(
  * Strategy order:
  * 1. a2dp_reflection — reflection on hidden BluetoothA2dp.disconnect()
  * 2. hfp_reflection — reflection on hidden BluetoothHeadset.disconnect()
- * 3. shizuku_privileged — Shizuku-based privileged control (if enabled)
- * 4. system_dialog — ACTION_REQUEST_DISABLE intent (always works, not silent)
+ * 3. system_disable_dialog — ACTION_REQUEST_DISABLE intent (always works, not silent)
  */
 class BluetoothDisconnector(
     private val context: Context,
@@ -65,16 +66,13 @@ class BluetoothDisconnector(
     val cooldownState: StateFlow<CooldownState> = _cooldownState.asStateFlow()
 
     private var cooldownJob: Job? = null
+    private val activeEnforcements = java.util.concurrent.ConcurrentHashMap<String, Job>()
 
     val isCooldownActive: Boolean
         get() = _cooldownState.value.active && System.currentTimeMillis() < _cooldownState.value.expiresAt
 
     // ── Public API ─────────────────────────────────────────────────────────
 
-    /**
-     * Primary disconnect: try the best method for each target device, log results.
-     * Returns aggregate result.
-     */
     @SuppressLint("MissingPermission")
     suspend fun disconnectDevices(
         devices: List<BluetoothDevice>,
@@ -108,29 +106,53 @@ class BluetoothDisconnector(
         return DisconnectResult(anySuccess, lastMethod, allTried)
     }
 
-    /**
-     * Disconnect a single device, trying methods in priority order.
-     * Self-learning: checks cached working method first.
-     */
     @SuppressLint("MissingPermission")
     suspend fun disconnectSingleDevice(device: BluetoothDevice): DisconnectResult {
         val tried = mutableListOf<Pair<String, Boolean>>()
         val cached = db.deviceDao().getDevice(device.address)?.workingDisconnectMethod
 
-        // Build ordered method list: cached first if available
         val methods = buildMethodOrder(cached)
 
+        var finalSuccess = false
+        var winningMethodId: String? = null
+
         for (method in methods) {
-            val success = try {
+            var exceptionMsg: String? = null
+            var executionResult = false
+            
+            try {
                 withTimeout(5000) { method.execute(context, device) }
+                executionResult = true
+            } catch (e: NoSuchMethodException) {
+                exceptionMsg = "NoSuchMethodException: ${e.message}"
+                Log.w(TAG, "Method ${method.id} failed: $exceptionMsg")
+            } catch (e: java.lang.reflect.InvocationTargetException) {
+                exceptionMsg = "InvocationTargetException: ${e.cause?.message ?: e.message}"
+                Log.w(TAG, "Method ${method.id} failed: $exceptionMsg")
+            } catch (e: SecurityException) {
+                exceptionMsg = "SecurityException: ${e.message}"
+                Log.w(TAG, "Method ${method.id} failed: $exceptionMsg")
             } catch (e: Exception) {
-                Log.w(TAG, "Method ${method.id} threw: ${e.message}")
-                false
+                exceptionMsg = "${e.javaClass.simpleName}: ${e.message}"
+                Log.w(TAG, "Method ${method.id} failed: $exceptionMsg")
             }
 
+            var actuallyDisconnected = false
+            if (method.id == "system_disable_dialog") {
+                // system_disable_dialog forces system dialog, wait for user. Assume success for logic flow.
+                actuallyDisconnected = true
+            } else if (executionResult) {
+                delay(1500L) // Wait for profile connections to drop
+                actuallyDisconnected = !isDeviceActuallyConnected(device)
+                if (!actuallyDisconnected) {
+                    exceptionMsg = "Silent no-op (device still connected)"
+                    Log.w(TAG, "Method ${method.id} failed: $exceptionMsg")
+                }
+            }
+
+            val success = executionResult && actuallyDisconnected
             tried.add(method.id to success)
 
-            // Log to DB
             scope.launch {
                 db.disconnectAttemptDao().insert(
                     DisconnectAttemptEntity(
@@ -139,31 +161,37 @@ class BluetoothDisconnector(
                         manufacturer = Build.MANUFACTURER,
                         methodId = method.id,
                         succeeded = success,
-                        lastTestedAt = System.currentTimeMillis()
+                        lastTestedAt = System.currentTimeMillis(),
+                        errorMessage = exceptionMsg
                     )
                 )
+                db.disconnectAttemptDao().deleteOldAttempts(device.address, 20)
             }
 
             if (success) {
-                // Cache the winning method
+                winningMethodId = method.id
+                finalSuccess = true
                 scope.launch { db.deviceDao().setWorkingMethod(device.address, method.id) }
-                return DisconnectResult(true, method.id, tried)
+                break
             }
         }
 
-        return DisconnectResult(false, null, tried)
+        return DisconnectResult(finalSuccess, winningMethodId, tried)
     }
 
-    /**
-     * Manual test: run all methods on a device and report what works.
-     */
     @SuppressLint("MissingPermission")
     suspend fun testAllMethods(device: BluetoothDevice): List<Pair<String, Boolean>> {
         val results = mutableListOf<Pair<String, Boolean>>()
         for (method in allMethods()) {
+            var exceptionMsg: String? = null
             val ok = try {
                 withTimeout(5000) { method.execute(context, device) }
-            } catch (_: Exception) { false }
+                delay(1500L)
+                if (method.id == "system_disable_dialog") true else !isDeviceActuallyConnected(device)
+            } catch (e: Exception) {
+                exceptionMsg = "${e.javaClass.simpleName}: ${e.message}"
+                false
+            }
             results.add(method.id to ok)
 
             db.disconnectAttemptDao().insert(
@@ -173,9 +201,11 @@ class BluetoothDisconnector(
                     manufacturer = Build.MANUFACTURER,
                     methodId = method.id,
                     succeeded = ok,
-                    lastTestedAt = System.currentTimeMillis()
+                    lastTestedAt = System.currentTimeMillis(),
+                    errorMessage = exceptionMsg
                 )
             )
+            db.disconnectAttemptDao().deleteOldAttempts(device.address, 20)
         }
         return results
     }
@@ -197,6 +227,11 @@ class BluetoothDisconnector(
     fun endCooldown() {
         cooldownJob?.cancel()
         _cooldownState.value = CooldownState()
+        // Cancel all active enforcement jobs
+        val keys = activeEnforcements.keys().toList()
+        for (key in keys) {
+            activeEnforcements.remove(key)?.cancel()
+        }
         Log.i(TAG, "Cooldown ended")
     }
 
@@ -207,15 +242,27 @@ class BluetoothDisconnector(
                 && address in state.targetAddresses
     }
 
-    /**
-     * Called from BroadcastReceiver when a device reconnects during cooldown.
-     */
     @SuppressLint("MissingPermission")
     fun enforceDisconnect(device: BluetoothDevice) {
-        scope.launch {
-            Log.i(TAG, "Enforcing re-disconnect on ${device.address}")
-            disconnectSingleDevice(device)
+        val address = device.address
+        // Cancel any existing enforcement job for this device to prevent concurrent loops
+        activeEnforcements[address]?.cancel()
+
+        val job = scope.launch {
+            Log.i(TAG, "Enforcing re-disconnect on $address")
+            for (i in 1..3) {
+                if (!shouldBlockDevice(address)) break
+                val result = disconnectSingleDevice(device)
+                if (result.success) {
+                    Log.i(TAG, "Enforce disconnect success on attempt $i for $address")
+                } else {
+                    Log.w(TAG, "Enforce disconnect failed on attempt $i for $address")
+                }
+                delay(1500L) // Wait for profile connections before trying again
+            }
+            activeEnforcements.remove(address)
         }
+        activeEnforcements[address] = job
     }
 
     // ── Method Registry ────────────────────────────────────────────────────
@@ -230,12 +277,19 @@ class BluetoothDisconnector(
         DisconnectMethod("le_audio_reflection", "LE Audio Reflection") { ctx, dev ->
             if (Build.VERSION.SDK_INT >= 33) {
                 disconnectViaProfile(ctx, 22, dev) // BluetoothProfile.LE_AUDIO = 22
-            } else false
+            } else throw UnsupportedOperationException("LE Audio requires API 33+")
         },
         DisconnectMethod("acl_reflection", "ACL Direct Disconnect") { _, dev ->
-            disconnectViaAcl(dev)
+            val method = dev.javaClass.getDeclaredMethod("disconnect")
+            method.isAccessible = true
+            method.invoke(dev)
         },
-        // Shizuku omitted from core list — added dynamically when enabled
+        DisconnectMethod("system_disable_dialog", "System Disable Dialog") { ctx, _ ->
+            val intent = Intent("android.bluetooth.adapter.action.REQUEST_DISABLE").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(intent)
+        }
     )
 
     private fun buildMethodOrder(cachedMethod: String?): List<DisconnectMethod> {
@@ -252,7 +306,70 @@ class BluetoothDisconnector(
         ctx: Context,
         profileType: Int,
         device: BluetoothDevice
-    ): Boolean = suspendCoroutine { cont ->
+    ) = suspendCoroutine<Unit> { cont ->
+        val ad = adapter
+        if (ad == null) { cont.resumeWithException(IllegalStateException("No BluetoothAdapter")); return@suspendCoroutine }
+
+        val resumed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        val listener = object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                var exception: Exception? = null
+                try {
+                    val method = proxy.javaClass.getDeclaredMethod("disconnect", BluetoothDevice::class.java)
+                    method.isAccessible = true
+                    method.invoke(proxy, device)
+                } catch (e: Exception) {
+                    exception = e
+                }
+                
+                runCatching { ad.closeProfileProxy(profile, proxy) }
+                
+                if (resumed.compareAndSet(false, true)) {
+                    if (exception != null) {
+                        cont.resumeWithException(exception)
+                    } else {
+                        cont.resume(Unit)
+                    }
+                }
+            }
+
+            override fun onServiceDisconnected(profile: Int) {
+                if (resumed.compareAndSet(false, true)) cont.resumeWithException(IllegalStateException("Profile disconnected before execution"))
+            }
+        }
+
+        val bound = ad.getProfileProxy(ctx, listener, profileType)
+        if (!bound && resumed.compareAndSet(false, true)) {
+            cont.resumeWithException(IllegalStateException("Failed to bind profile proxy"))
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun isDeviceActuallyConnected(device: BluetoothDevice): Boolean {
+        // Reflection check
+        val reflectConnected = try {
+            val method = device.javaClass.getDeclaredMethod("isConnected")
+            method.isAccessible = true
+            method.invoke(device) as? Boolean ?: false
+        } catch (e: Exception) {
+            false
+        }
+        if (reflectConnected) return true
+
+        // Deep verification check via profile proxies
+        return isDeviceConnectedViaProfiles(device)
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun isDeviceConnectedViaProfiles(device: BluetoothDevice): Boolean {
+        val a2dpConnected = isDeviceConnectedViaProfileType(BluetoothProfile.A2DP, device)
+        val hfpConnected = isDeviceConnectedViaProfileType(BluetoothProfile.HEADSET, device)
+        return a2dpConnected || hfpConnected
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun isDeviceConnectedViaProfileType(profileType: Int, device: BluetoothDevice): Boolean = suspendCoroutine { cont ->
         val ad = adapter
         if (ad == null) { cont.resume(false); return@suspendCoroutine }
 
@@ -260,16 +377,16 @@ class BluetoothDisconnector(
 
         val listener = object : BluetoothProfile.ServiceListener {
             override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                val success = try {
-                    val method = proxy.javaClass.getMethod("disconnect", BluetoothDevice::class.java)
-                    method.invoke(proxy, device)
-                    true
+                val state = try {
+                    proxy.getConnectionState(device)
                 } catch (e: Exception) {
-                    Log.w(TAG, "Profile $profileType reflection failed: ${e.message}")
-                    false
+                    Log.e(TAG, "Failed to get connection state for profile $profileType: ${e.message}")
+                    BluetoothProfile.STATE_DISCONNECTED
                 }
                 runCatching { ad.closeProfileProxy(profile, proxy) }
-                if (resumed.compareAndSet(false, true)) cont.resume(success)
+                if (resumed.compareAndSet(false, true)) {
+                    cont.resume(state == BluetoothProfile.STATE_CONNECTED)
+                }
             }
 
             override fun onServiceDisconnected(profile: Int) {
@@ -277,20 +394,9 @@ class BluetoothDisconnector(
             }
         }
 
-        val bound = ad.getProfileProxy(ctx, listener, profileType)
+        val bound = ad.getProfileProxy(context, listener, profileType)
         if (!bound && resumed.compareAndSet(false, true)) {
             cont.resume(false)
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun disconnectViaAcl(device: BluetoothDevice): Boolean {
-        return try {
-            device.javaClass.getMethod("disconnect").invoke(device)
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "ACL disconnect failed: ${e.message}")
-            false
         }
     }
 
@@ -319,21 +425,21 @@ class BluetoothDisconnector(
 
     // ── Utility ────────────────────────────────────────────────────────────
 
-    /**
-     * Returns all currently connected audio devices (A2DP).
-     */
     @SuppressLint("MissingPermission")
     fun getConnectedAudioDevices(): List<BluetoothDevice> {
         val ad = adapter ?: return emptyList()
         val result = mutableListOf<BluetoothDevice>()
 
-        // Check bonded devices connection state
         runCatching {
             ad.bondedDevices?.forEach { device ->
-                val connected = try {
-                    device.javaClass.getMethod("isConnected").invoke(device) as? Boolean ?: false
-                } catch (_: Exception) { false }
-                if (connected) result.add(device)
+                val isConn = try {
+                    val method = device.javaClass.getDeclaredMethod("isConnected")
+                    method.isAccessible = true
+                    method.invoke(device) as? Boolean ?: false
+                } catch (e: Exception) {
+                    false
+                }
+                if (isConn) result.add(device)
             }
         }
         return result

@@ -85,15 +85,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Shizuku provider for privileged BT/Wifi control -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"
-            tools:ignore="MissingClass" />
 
     </application>
 </manifest>

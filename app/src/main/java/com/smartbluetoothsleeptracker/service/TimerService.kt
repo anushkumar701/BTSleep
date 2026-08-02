@@ -85,10 +85,7 @@ class TimerService : Service() {
         warningFired = false
 
         // Acquire wake lock
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "btcurfew:timer").apply {
-            acquire(minutes * 60_000L + 60_000L) // timer + 1 min buffer
-        }
+        acquireWakeLock(minutes)
 
         // Start foreground
         val notif = AppNotifications.timerNotification(this, formatRemaining()).build()
@@ -168,8 +165,7 @@ class TimerService : Service() {
      * EXPIRY SEQUENCE (ordered):
      * 1. Playback stop (volume fade)
      * 2. Bluetooth disconnect
-     * 3. Wifi off
-     * 4. Screen off
+     * 3. Screen off
      */
     @SuppressLint("MissingPermission")
     private fun onTimerExpired() {
@@ -212,15 +208,9 @@ class TimerService : Service() {
                 DisconnectResult(true, null, emptyList())
             }
 
-            // ── STEP 3: Wifi Off ───────────────────────────────────────
-            if (settings.wifiOffEnabled) {
-                Log.i(TAG, "Step 3: Wifi off")
-                app.wifiController.disableWifi(useShizuku = settings.shizukuEnabled)
-            }
-
-            // ── STEP 4: Screen Off ─────────────────────────────────────
+            // ── STEP 3: Screen Off ─────────────────────────────────────
             if (settings.screenOffEnabled) {
-                Log.i(TAG, "Step 4: Screen off (lockNow)")
+                Log.i(TAG, "Step 3: Screen off (lockNow)")
                 app.screenController.lockScreen()
             }
 
@@ -319,6 +309,10 @@ class TimerService : Service() {
         app.prefs.setTimerEnd(endTimeMillis)
         app.prefs.setTimerExtended(extendedMinutes)
 
+        val remainingMs = (endTimeMillis - System.currentTimeMillis()).coerceAtLeast(0)
+        val remainingMin = ((remainingMs + 59_999L) / 60_000L).toInt().coerceAtLeast(1)
+        acquireWakeLock(remainingMin)
+
         // Restart tick loop if it was stopped
         if (tickJob?.isActive != true) {
             startTickLoop()
@@ -358,6 +352,9 @@ class TimerService : Service() {
                 delay(1000)
             }
             nm.cancel(AppNotifications.NOTIF_COOLDOWN)
+            app.disconnector.endCooldown()
+            Log.i(TAG, "Cooldown expired naturally, stopping service")
+            stopSelf()
         }
     }
 
@@ -385,9 +382,18 @@ class TimerService : Service() {
         wakeLock = null
     }
 
+    private fun acquireWakeLock(minutes: Int) {
+        releaseWakeLock()
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "btcurfew:timer").apply {
+            acquire(minutes * 60_000L + 60_000L) // timer + 1 min buffer
+        }
+    }
+
     override fun onDestroy() {
         tickJob?.cancel()
         cooldownTickJob?.cancel()
+        app.disconnector.endCooldown()
         releaseWakeLock()
         scope.cancel()
         super.onDestroy()

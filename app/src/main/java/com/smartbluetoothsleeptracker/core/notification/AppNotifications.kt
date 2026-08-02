@@ -59,7 +59,7 @@ object AppNotifications {
 
         return NotificationCompat.Builder(ctx, CHANNEL_TIMER)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("BT Curfew Active")
+            .setContentTitle("SleepBT Active")
             .setContentText(remainingText)
             .setOngoing(true)
             .setSilent(true)

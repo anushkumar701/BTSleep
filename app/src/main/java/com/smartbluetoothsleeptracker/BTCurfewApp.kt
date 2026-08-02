@@ -6,7 +6,6 @@ import com.smartbluetoothsleeptracker.core.bluetooth.BluetoothMonitor
 import com.smartbluetoothsleeptracker.core.notification.AppNotifications
 import com.smartbluetoothsleeptracker.core.playback.PlaybackController
 import com.smartbluetoothsleeptracker.core.screen.ScreenController
-import com.smartbluetoothsleeptracker.core.wifi.WifiController
 import com.smartbluetoothsleeptracker.data.db.AppDatabase
 import com.smartbluetoothsleeptracker.data.prefs.AppPrefs
 
@@ -17,7 +16,6 @@ class BTCurfewApp : Application() {
     lateinit var disconnector: BluetoothDisconnector
     lateinit var btMonitor: BluetoothMonitor
     lateinit var playbackController: PlaybackController
-    lateinit var wifiController: WifiController
     lateinit var screenController: ScreenController
 
     override fun onCreate() {
@@ -28,7 +26,6 @@ class BTCurfewApp : Application() {
         disconnector = BluetoothDisconnector(this, db)
         btMonitor = BluetoothMonitor(this, db)
         playbackController = PlaybackController(this)
-        wifiController = WifiController(this)
         screenController = ScreenController(this)
 
         AppNotifications.createChannels(this)

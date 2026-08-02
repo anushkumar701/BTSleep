@@ -52,6 +52,9 @@ interface DisconnectAttemptDao {
 
     @Query("DELETE FROM disconnect_attempts WHERE device_address = :address")
     suspend fun clearForDevice(address: String)
+
+    @Query("DELETE FROM disconnect_attempts WHERE device_address = :address AND id NOT IN (SELECT id FROM disconnect_attempts WHERE device_address = :address ORDER BY last_tested_at DESC LIMIT :keep)")
+    suspend fun deleteOldAttempts(address: String, keep: Int)
 }
 
 @Dao

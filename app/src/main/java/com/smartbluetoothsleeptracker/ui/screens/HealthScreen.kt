@@ -53,8 +53,8 @@ fun HealthScreen(
     LazyColumn(
         modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(
-            top = WindowInsets.systemBars.asPaddingValues().calculateTopPadding() + 20.dp,
-            bottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 24.dp,
+            top = 20.dp,
+            bottom = 24.dp,
             start = 24.dp, end = 24.dp
         ),
         verticalArrangement = Arrangement.spacedBy(20.dp)
@@ -155,39 +155,115 @@ fun HealthScreen(
         item {
             Column(
                 Modifier.fillMaxWidth()
-                    .background(Surface1, RoundedCornerShape(20.dp))
+                    .background(Surface1, RoundedCornerShape(24.dp))
                     .padding(20.dp)
             ) {
                 Text("Weekly Trend", style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold, color = TextPrimary)
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(24.dp))
 
-                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.Bottom) {
-                    state.weeklyData.forEach { (label, mins) ->
-                        val maxMins = state.weeklyData.maxOf { it.second }.coerceAtLeast(60)
-                        val frac = (mins / maxMins.toFloat()).coerceIn(0.04f, 1f)
-                        val color = when { mins > 120 -> StatusRed; mins > 60 -> StatusOrange; else -> AccentBlue }
-                        val animFrac by animateFloatAsState(frac, tween(800), label = "w")
+                val maxMins = state.weeklyData.map { it.second }.maxOrNull()?.coerceAtLeast(60) ?: 60
 
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                if (mins > 0) "${mins}m" else "",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = color, fontWeight = FontWeight.Bold, fontSize = 9.sp
+                Box(modifier = Modifier.fillMaxWidth().height(140.dp)) {
+                    // Dotted grid lines
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(bottom = 24.dp),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        listOf("${maxMins}m", "${maxMins / 2}m", "0m").forEach { valLabel ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    valLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextTertiary,
+                                    fontSize = 8.sp,
+                                    modifier = Modifier.width(36.dp),
+                                    textAlign = TextAlign.Start
+                                )
+                                androidx.compose.foundation.Canvas(modifier = Modifier.weight(1f).height(1.dp)) {
+                                    drawLine(
+                                        color = SurfaceBorder,
+                                        start = Offset(0f, 0f),
+                                        end = Offset(size.width, 0f),
+                                        strokeWidth = 2f,
+                                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Bars
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(start = 40.dp, bottom = 24.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        state.weeklyData.forEach { (_, mins) ->
+                            val frac = (mins / maxMins.toFloat()).coerceIn(0.02f, 1f)
+                            val color = when {
+                                mins > 120 -> StatusRed
+                                mins > 60 -> StatusOrange
+                                else -> AccentBlue
+                            }
+                            val animFrac by animateFloatAsState(
+                                targetValue = frac,
+                                animationSpec = tween(800, easing = FastOutSlowInEasing),
+                                label = "wBar"
                             )
-                            Spacer(Modifier.height(4.dp))
-                            Box(
-                                Modifier.width(28.dp).height((80 * animFrac).dp)
-                                    .background(Brush.verticalGradient(listOf(color, color.copy(0.4f))), RoundedCornerShape(6.dp))
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Text(label, style = MaterialTheme.typography.labelSmall,
-                                color = if (label == "Today") AccentBlue else TextTertiary, fontSize = 9.sp)
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (mins > 0) {
+                                    Text(
+                                        "${mins}m",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = color,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 8.sp
+                                    )
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Box(
+                                    Modifier
+                                        .width(16.dp)
+                                        .height((80 * animFrac).dp)
+                                        .background(
+                                            brush = Brush.verticalGradient(
+                                                listOf(color, color.copy(0.3f))
+                                            ),
+                                            shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 2.dp, bottomEnd = 2.dp)
+                                        )
+                                )
+                            }
                         }
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                // Labels
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 40.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    state.weeklyData.forEach { (label, _) ->
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (label == "Today") AccentBlue else TextTertiary,
+                            fontWeight = if (label == "Today") FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 10.sp,
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
                 // Legend
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     LegendDot(StatusGreen, "< 1h (Safe)")

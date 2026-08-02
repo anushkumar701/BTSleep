@@ -19,7 +19,6 @@ data class AppSettings(
     // Bluetooth
     val reconnectBlockerEnabled: Boolean = true,
     val cooldownSeconds: Int = 30,
-    val shizukuEnabled: Boolean = false,
 
     // Playback Control
     val playbackStopEnabled: Boolean = true,
@@ -28,8 +27,7 @@ data class AppSettings(
     // Screen Off
     val screenOffEnabled: Boolean = false,
 
-    // Wifi Off
-    val wifiOffEnabled: Boolean = false,
+
 
     // Haptic Feedback
     val hapticFeedbackEnabled: Boolean = true,
@@ -69,11 +67,9 @@ class AppPrefs(private val context: Context) {
                 extendMinutes           = prefs[EXTEND_MINUTES] ?: 5,
                 reconnectBlockerEnabled = prefs[RECONNECT_BLOCKER] ?: true,
                 cooldownSeconds         = prefs[COOLDOWN_SECONDS] ?: 30,
-                shizukuEnabled          = prefs[SHIZUKU_ENABLED] ?: false,
                 playbackStopEnabled     = prefs[PLAYBACK_STOP] ?: true,
                 fadeOutDurationSeconds  = prefs[FADE_DURATION] ?: 10,
                 screenOffEnabled        = prefs[SCREEN_OFF] ?: false,
-                wifiOffEnabled          = prefs[WIFI_OFF] ?: false,
                 hapticFeedbackEnabled   = prefs[HAPTIC_FEEDBACK] ?: true,
                 sleepAlertsEnabled      = prefs[SLEEP_ALERTS] ?: true,
                 warningLeadMinutes      = prefs[WARNING_LEAD] ?: 2,
@@ -95,11 +91,9 @@ class AppPrefs(private val context: Context) {
     suspend fun setExtendMinutes(m: Int)          = ds.edit { it[EXTEND_MINUTES] = m.coerceIn(1, 60) }
     suspend fun setReconnectBlocker(on: Boolean)  = ds.edit { it[RECONNECT_BLOCKER] = on }
     suspend fun setCooldownSeconds(s: Int)        = ds.edit { it[COOLDOWN_SECONDS] = s.coerceIn(0, 120) }
-    suspend fun setShizukuEnabled(on: Boolean)    = ds.edit { it[SHIZUKU_ENABLED] = on }
     suspend fun setPlaybackStop(on: Boolean)      = ds.edit { it[PLAYBACK_STOP] = on }
     suspend fun setFadeOutDuration(s: Int)        = ds.edit { it[FADE_DURATION] = s.coerceIn(3, 30) }
     suspend fun setScreenOff(on: Boolean)         = ds.edit { it[SCREEN_OFF] = on }
-    suspend fun setWifiOff(on: Boolean)           = ds.edit { it[WIFI_OFF] = on }
     suspend fun setHapticFeedback(on: Boolean)    = ds.edit { it[HAPTIC_FEEDBACK] = on }
     suspend fun setSleepAlerts(on: Boolean)       = ds.edit { it[SLEEP_ALERTS] = on }
     suspend fun setWarningLeadMinutes(m: Int)     = ds.edit { it[WARNING_LEAD] = m.coerceIn(1, 10) }
@@ -130,11 +124,9 @@ class AppPrefs(private val context: Context) {
         val EXTEND_MINUTES      = intPreferencesKey("extend_minutes")
         val RECONNECT_BLOCKER   = booleanPreferencesKey("reconnect_blocker")
         val COOLDOWN_SECONDS    = intPreferencesKey("cooldown_seconds")
-        val SHIZUKU_ENABLED     = booleanPreferencesKey("shizuku_enabled")
         val PLAYBACK_STOP       = booleanPreferencesKey("playback_stop")
         val FADE_DURATION       = intPreferencesKey("fade_duration")
         val SCREEN_OFF          = booleanPreferencesKey("screen_off")
-        val WIFI_OFF            = booleanPreferencesKey("wifi_off")
         val HAPTIC_FEEDBACK     = booleanPreferencesKey("haptic_feedback")
         val SLEEP_ALERTS        = booleanPreferencesKey("sleep_alerts")
         val WARNING_LEAD        = intPreferencesKey("warning_lead")

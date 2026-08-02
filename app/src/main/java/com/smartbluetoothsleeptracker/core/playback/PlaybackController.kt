@@ -46,6 +46,7 @@ class PlaybackController(private val context: Context) {
     @Volatile private var priorVolume: Int = -1
     @Volatile private var userCancelled = false
     private var volumeReceiver: BroadcastReceiver? = null
+    private val internalVolumeChanges = java.util.Collections.synchronizedList(mutableListOf<Pair<Int, Long>>())
 
     /**
      * Primary entry point. Gradually fades STREAM_MUSIC volume to 0 over [durationSeconds].
@@ -68,6 +69,7 @@ class PlaybackController(private val context: Context) {
             val totalSteps = (durationSeconds * 1000L / FADE_TICK_MS).toInt()
             val volumeDecrement = priorVolume.toFloat() / totalSteps.toFloat()
             var currentStep = 0
+            var lastSetVol = priorVolume
 
             while (currentStep < totalSteps) {
                 if (userCancelled) {
@@ -81,16 +83,27 @@ class PlaybackController(private val context: Context) {
 
                 currentStep++
                 val newVol = (priorVolume - (volumeDecrement * currentStep)).toInt().coerceAtLeast(0)
-                try {
-                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
-                } catch (e: Exception) {
-                    Log.w(TAG, "setStreamVolume failed: ${e.message}")
+                if (newVol != lastSetVol) {
+                    try {
+                        internalVolumeChanges.add(Pair(newVol, System.currentTimeMillis()))
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+                        lastSetVol = newVol
+                    } catch (e: Exception) {
+                        Log.w(TAG, "setStreamVolume failed: ${e.message}")
+                    }
                 }
                 delay(FADE_TICK_MS)
             }
 
             // Ensure volume is 0
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+            if (lastSetVol != 0) {
+                try {
+                    internalVolumeChanges.add(Pair(0, System.currentTimeMillis()))
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+                } catch (e: Exception) {
+                    Log.w(TAG, "setStreamVolume failed: ${e.message}")
+                }
+            }
             Log.i(TAG, "Fade completed — volume at 0")
 
             // Steal focus and pause media sessions
@@ -106,6 +119,7 @@ class PlaybackController(private val context: Context) {
 
         } finally {
             unregisterVolumeReceiver()
+            internalVolumeChanges.clear()
         }
     }
 
@@ -181,8 +195,21 @@ class PlaybackController(private val context: Context) {
                 if (intent.action == "android.media.VOLUME_CHANGED_ACTION") {
                     val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
                     if (streamType == AudioManager.STREAM_MUSIC) {
-                        Log.i(TAG, "Volume key detected during fade — cancelling")
-                        userCancelled = true
+                        val newVol = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
+                        val currentVol = if (newVol != -1) newVol else audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                        
+                        val now = System.currentTimeMillis()
+                        // Clean up old entries (older than 2 seconds)
+                        internalVolumeChanges.removeAll { now - it.second > 2000L }
+                        
+                        // Check if this volume was set internally recently
+                        val isInternal = internalVolumeChanges.any { it.first == currentVol }
+                        if (isInternal) {
+                            Log.d(TAG, "Volume changed internally to $currentVol, ignoring")
+                        } else {
+                            Log.i(TAG, "Volume changed externally to $currentVol, user cancelled fade")
+                            userCancelled = true
+                        }
                     }
                 }
             }

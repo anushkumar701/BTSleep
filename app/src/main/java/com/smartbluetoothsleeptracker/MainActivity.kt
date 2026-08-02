@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -25,23 +27,34 @@ class MainActivity : ComponentActivity() {
         val homeVm = ViewModelProvider(this)[HomeViewModel::class.java]
 
         setContent {
-            val settings by app.prefs.settings.collectAsStateWithLifecycle(
-                initialValue = AppSettings()
-            )
+            val scope = rememberCoroutineScope()
+            val settingsState by produceState<AppSettings?>(initialValue = null) {
+                app.prefs.settings.collect { value = it }
+            }
 
-            BTCurfewTheme(themeMode = settings.themeMode) {
-                if (!settings.onboardingComplete) {
-                    OnboardingScreen(
-                        onComplete = {
-                            kotlinx.coroutines.MainScope().launch {
-                                app.prefs.setOnboardingComplete(true)
-                                app.prefs.setTosAccepted(System.currentTimeMillis())
+            if (settingsState != null) {
+                val settings = settingsState!!
+                BTCurfewTheme(themeMode = settings.themeMode) {
+                    if (!settings.onboardingComplete) {
+                        OnboardingScreen(
+                            onComplete = {
+                                scope.launch {
+                                    app.prefs.setOnboardingComplete(true)
+                                    app.prefs.setTosAccepted(System.currentTimeMillis())
+                                }
                             }
-                        }
-                    )
-                } else {
-                    AppNavigation(homeViewModel = homeVm)
+                        )
+                    } else {
+                        AppNavigation(homeViewModel = homeVm)
+                    }
                 }
+            } else {
+                // Dark background placeholder during cold start load
+                androidx.compose.foundation.layout.Box(
+                    modifier = androidx.compose.ui.Modifier
+                        .fillMaxSize()
+                        .background(androidx.compose.ui.graphics.Color(0xFF0A0A0C))
+                )
             }
         }
     }

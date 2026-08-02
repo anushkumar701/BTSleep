@@ -29,7 +29,6 @@ data class PermissionStatus(
 
 data class SettingsUiState(
     val settings: AppSettings = AppSettings(),
-    val shizukuAvailable: Boolean = false,
     val deviceAdminActive: Boolean = false,
     val permissions: List<PermissionStatus> = emptyList()
 )
@@ -52,17 +51,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun refreshStatus() {
         val ctx = getApplication<Application>()
 
-        val shizukuAvailable = try {
-            rikka.shizuku.Shizuku.pingBinder()
-        } catch (_: Exception) { false }
-
         val deviceAdminActive = app.screenController.isDeviceAdminActive()
 
         val permissions = buildPermissionsList(ctx)
 
         _state.update {
             it.copy(
-                shizukuAvailable = shizukuAvailable,
                 deviceAdminActive = deviceAdminActive,
                 permissions = permissions
             )
@@ -118,15 +112,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             settingsAction = Settings.ACTION_SECURITY_SETTINGS
         ))
 
-        // 6. Shizuku
-        val shizukuOk = try { rikka.shizuku.Shizuku.pingBinder() } catch (_: Exception) { false }
-        list.add(PermissionStatus(
-            name = "Shizuku",
-            description = "Privileged BT/Wifi control without root",
-            granted = shizukuOk,
-            settingsAction = null // Shizuku has its own app
-        ))
-
         return list
     }
 
@@ -136,7 +121,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     // Bluetooth
     fun setReconnectBlocker(on: Boolean)  = viewModelScope.launch { app.prefs.setReconnectBlocker(on) }
     fun setCooldownSeconds(s: Int)        = viewModelScope.launch { app.prefs.setCooldownSeconds(s) }
-    fun setShizukuEnabled(on: Boolean)    = viewModelScope.launch { app.prefs.setShizukuEnabled(on) }
 
     // Playback
     fun setPlaybackStop(on: Boolean)      = viewModelScope.launch { app.prefs.setPlaybackStop(on) }
@@ -145,8 +129,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     // Screen Off
     fun setScreenOff(on: Boolean)         = viewModelScope.launch { app.prefs.setScreenOff(on) }
 
-    // Wifi Off
-    fun setWifiOff(on: Boolean)           = viewModelScope.launch { app.prefs.setWifiOff(on) }
 
     // Haptic
     fun setHapticFeedback(on: Boolean)    = viewModelScope.launch { app.prefs.setHapticFeedback(on) }

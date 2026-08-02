@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -77,8 +78,8 @@ fun UsageScreen(
     LazyColumn(
         modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(
-            top = WindowInsets.systemBars.asPaddingValues().calculateTopPadding() + 20.dp,
-            bottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 24.dp,
+            top = 20.dp,
+            bottom = 24.dp,
             start = 24.dp, end = 24.dp
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -218,35 +219,110 @@ private fun WeeklyChart(dailyUsage: List<com.smartbluetoothsleeptracker.data.db.
     val maxMin = days.maxOf { it.second }.coerceAtLeast(60)
 
     Column(
-        Modifier.fillMaxWidth().background(Surface1, RoundedCornerShape(20.dp)).padding(20.dp)
+        Modifier.fillMaxWidth().background(Surface1, RoundedCornerShape(24.dp)).padding(20.dp)
     ) {
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
             Text("Last 7 Days", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Text("${days.sumOf { it.second }}m", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Text("${days.sumOf { it.second }}m total", style = MaterialTheme.typography.labelMedium, color = AccentBlue, fontWeight = FontWeight.SemiBold)
         }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(24.dp))
 
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.Bottom) {
-            days.forEach { (label, minutes, isToday) ->
-                val frac = (minutes / maxMin.toFloat()).coerceIn(0.04f, 1f)
-                val color = when { minutes > 120 -> StatusRed; minutes > 60 -> StatusOrange; else -> AccentBlue }
-                val animFrac by animateFloatAsState(frac, tween(800, easing = FastOutSlowInEasing), label = "b")
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        if (minutes > 0) "${minutes}m" else "",
-                        style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold, fontSize = 9.sp
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Box(
-                        Modifier.width(30.dp).height((90 * animFrac).dp)
-                            .background(Brush.verticalGradient(listOf(color, color.copy(0.4f))), RoundedCornerShape(6.dp))
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(label, style = MaterialTheme.typography.labelSmall,
-                        color = if (isToday) AccentBlue else TextTertiary,
-                        fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal, fontSize = 10.sp)
+        Box(modifier = Modifier.fillMaxWidth().height(140.dp)) {
+            // Dotted grid lines
+            Column(
+                modifier = Modifier.fillMaxSize().padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                listOf("${maxMin}m", "${maxMin / 2}m", "0m").forEach { valLabel ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            valLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextTertiary,
+                            fontSize = 8.sp,
+                            modifier = Modifier.width(36.dp),
+                            textAlign = TextAlign.Start
+                        )
+                        androidx.compose.foundation.Canvas(modifier = Modifier.weight(1f).height(1.dp)) {
+                            drawLine(
+                                color = SurfaceBorder,
+                                start = Offset(0f, 0f),
+                                end = Offset(size.width, 0f),
+                                strokeWidth = 2f,
+                                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                            )
+                        }
+                    }
                 }
+            }
+
+            // Bars
+            Row(
+                modifier = Modifier.fillMaxSize().padding(start = 40.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                days.forEach { (_, minutes, _) ->
+                    val frac = (minutes / maxMin.toFloat()).coerceIn(0.02f, 1f)
+                    val color = when {
+                        minutes > 120 -> StatusRed
+                        minutes > 60 -> StatusOrange
+                        else -> AccentBlue
+                    }
+                    val animFrac by animateFloatAsState(
+                        targetValue = frac,
+                        animationSpec = tween(800, easing = FastOutSlowInEasing),
+                        label = "barHeight"
+                      )
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (minutes > 0) {
+                            Text(
+                                "${minutes}m",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = color,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 8.sp
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Box(
+                            Modifier
+                                .width(16.dp)
+                                .height((80 * animFrac).dp)
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        listOf(color, color.copy(0.3f))
+                                    ),
+                                    shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 2.dp, bottomEnd = 2.dp)
+                                )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Labels
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 40.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            days.forEach { (label, _, isToday) ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isToday) AccentBlue else TextTertiary,
+                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 10.sp,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center
+                )
             }
         }
     }
@@ -276,16 +352,40 @@ private fun DeviceRow(stat: DeviceUsageStat, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stat.device.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (stat.device.isFavorite) {
-                    Spacer(Modifier.width(6.dp))
-                    Icon(Icons.Rounded.Star, null, tint = AccentBlue, modifier = Modifier.size(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                    Text(
+                        stat.device.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (stat.device.isFavorite) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Rounded.Star, null, tint = AccentBlue, modifier = Modifier.size(14.dp))
+                    }
                 }
+                Text(
+                    formatDuration(stat.totalMinutes.toLong() * 60_000L),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Black,
+                    color = AccentBlue
+                )
             }
-            Text("${stat.sessionCount} sessions · ${formatDuration(stat.totalMinutes.toLong() * 60_000L)}",
-                style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${stat.sessionCount} sessions",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary
+            )
         }
+        Spacer(Modifier.width(8.dp))
         Icon(Icons.Rounded.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(20.dp))
     }
 }
@@ -294,33 +394,64 @@ private fun DeviceRow(stat: DeviceUsageStat, onClick: () -> Unit) {
 private fun SessionRow(session: SessionEntity, onDelete: () -> Unit) {
     Row(
         Modifier.fillMaxWidth()
-            .background(Surface1, RoundedCornerShape(14.dp))
-            .padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 6.dp),
+            .background(Surface1, RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .background(
+                    if (session.disconnectConfirmed) StatusGreen.copy(0.12f) else StatusOrange.copy(0.12f),
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (session.disconnectConfirmed) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                contentDescription = null,
+                tint = if (session.disconnectConfirmed) StatusGreen else StatusOrange,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(session.deviceName.ifEmpty { session.deviceAddress },
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-            Row {
+            Text(
+                session.deviceName.ifEmpty { session.deviceAddress },
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                formatDate(session.startTime),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        if (session.actualDurationMin != null) {
+            Box(
+                Modifier
+                    .background(Surface3, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
                 Text(
-                    formatDate(session.startTime),
-                    style = MaterialTheme.typography.labelSmall, color = TextSecondary
+                    "Played: ${session.actualDurationMin}m / Set: ${session.plannedDurationMin}m",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
                 )
-                if (session.actualDurationMin != null) {
-                    Text(
-                        " · ${session.actualDurationMin}m / ${session.plannedDurationMin}m",
-                        style = MaterialTheme.typography.labelSmall, color = TextTertiary
-                    )
-                }
             }
         }
-        if (session.disconnectConfirmed) {
-            Icon(Icons.Rounded.CheckCircle, "Confirmed", tint = StatusGreen, modifier = Modifier.size(18.dp))
-        } else {
-            Icon(Icons.Rounded.Warning, "Unconfirmed", tint = StatusOrange, modifier = Modifier.size(18.dp))
-        }
-        IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Rounded.Close, "Delete", tint = TextTertiary, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(32.dp).background(Surface3.copy(0.5f), CircleShape)
+        ) {
+            Icon(Icons.Rounded.Close, "Delete", tint = TextTertiary, modifier = Modifier.size(14.dp))
         }
     }
 }

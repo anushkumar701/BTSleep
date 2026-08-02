@@ -86,8 +86,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setMinutes(m: Long) {
+    fun setMinutesEphemeral(m: Long) {
         _state.update { it.copy(selectedMinutes = m.coerceIn(1, 480)) }
+    }
+
+    fun saveMinutes(m: Long) {
         viewModelScope.launch { app.prefs.setSelectedMinutes(m) }
     }
 

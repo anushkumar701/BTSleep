@@ -9,7 +9,7 @@ import android.util.Log
 /**
  * DeviceAdminReceiver for the lockNow() functionality.
  * The user must manually grant Device Admin via:
- *   Settings > Security > Device admin apps > BT Curfew
+ *   Settings > Security > Device admin apps > SleepBT
  */
 class BTCurfewDeviceAdmin : DeviceAdminReceiver() {
 
@@ -31,6 +31,6 @@ class BTCurfewDeviceAdmin : DeviceAdminReceiver() {
     }
 
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
-        return "Disabling Device Admin will prevent BT Curfew from locking the screen on timer expiry."
+        return "Disabling Device Admin will prevent SleepBT from locking the screen on timer expiry."
     }
 }

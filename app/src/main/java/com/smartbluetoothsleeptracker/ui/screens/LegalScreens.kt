@@ -46,13 +46,13 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(4.dp))
 
             LegalSection("Overview") {
-                "BT Curfew is a locally-installed Android utility that manages Bluetooth device " +
+                "SleepBT is a locally-installed Android utility that manages Bluetooth device " +
                 "disconnection via sleep timers. This app is distributed as a sideloaded APK and " +
                 "is not available on the Google Play Store."
             }
 
             LegalSection("Data Collection") {
-                "BT Curfew does NOT collect, transmit, or store any personal data on external servers.\n\n" +
+                "SleepBT does NOT collect, transmit, or store any personal data on external servers.\n\n" +
                 "All data — including device records, session history, usage statistics, and preferences — " +
                 "is stored exclusively on your device using a local Room database and Android DataStore.\n\n" +
                 "No analytics, telemetry, crash reports, or usage data is sent to any server. " +
@@ -71,15 +71,13 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                 "• Notification Listener (optional) — Enables fetching active media sessions to " +
                 "pause playback on timer expiry. No notification content is read or stored.\n\n" +
                 "• Device Admin (optional) — Enables locking the screen on timer expiry. Can be " +
-                "revoked at any time via system settings.\n\n" +
-                "• Wifi State (optional) — Enables disabling wifi on timer expiry if configured."
+                "revoked at any time via system settings."
             }
 
-            LegalSection("Bluetooth & Wifi Actions") {
-                "All Bluetooth disconnection, wifi control, and screen-off actions happen entirely " +
+            LegalSection("Bluetooth Actions") {
+                "All Bluetooth disconnection and screen-off actions happen entirely " +
                 "on your device using Android system APIs. No remote commands are sent or received.\n\n" +
-                "The app uses reflection-based APIs and optional Shizuku integration for privileged " +
-                "control. These methods operate locally and do not require or establish any network connection."
+                "The app uses reflection-based APIs for control. These methods operate locally and do not require or establish any network connection."
             }
 
             LegalSection("Health Data") {
@@ -90,7 +88,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
             }
 
             LegalSection("Third-Party Services") {
-                "BT Curfew does not integrate with any third-party analytics, advertising, or " +
+                "SleepBT does not integrate with any third-party analytics, advertising, or " +
                 "tracking services. The app operates completely offline."
             }
 
@@ -145,16 +143,16 @@ fun TermsOfServiceScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(4.dp))
 
             LegalSection("Acceptance") {
-                "By installing and using BT Curfew, you agree to these Terms of Service. " +
+                "By installing and using SleepBT, you agree to these Terms of Service. " +
                 "If you do not agree, uninstall the app immediately."
             }
 
             LegalSection("Description of Service") {
-                "BT Curfew is a personal utility application that:\n\n" +
+                "SleepBT is a personal utility application that:\n\n" +
                 "• Runs a configurable sleep timer\n" +
                 "• Disconnects paired Bluetooth audio devices when the timer expires\n" +
                 "• Optionally stops media playback with a gradual volume fade\n" +
-                "• Optionally disables wifi and locks the screen on timer expiry\n" +
+                "• Optionally locks the screen on timer expiry\n" +
                 "• Tracks listening duration for ear health awareness\n\n" +
                 "The app is designed for personal, non-commercial use and is distributed " +
                 "as a sideloaded APK only."
@@ -162,12 +160,12 @@ fun TermsOfServiceScreen(onBack: () -> Unit) {
 
             LegalSection("Local-Only Operation") {
                 "All data processing, storage, and device control actions happen entirely on your " +
-                "device. BT Curfew has no server infrastructure, no cloud storage, and makes no " +
+                "device. SleepBT has no server infrastructure, no cloud storage, and makes no " +
                 "network requests. Your data never leaves your device."
             }
 
             LegalSection("Bluetooth & System Control") {
-                "This app uses reflection-based Android APIs and optional Shizuku integration to " +
+                "This app uses reflection-based Android APIs to " +
                 "control Bluetooth connections. These methods:\n\n" +
                 "• May not work on all devices or OEM Android skins\n" +
                 "• Are not guaranteed by Google or your device manufacturer\n" +
@@ -184,7 +182,7 @@ fun TermsOfServiceScreen(onBack: () -> Unit) {
             }
 
             LegalSection("No Warranty") {
-                "BT Curfew is provided \"as is\" without warranty of any kind, express or implied. " +
+                "SleepBT is provided \"as is\" without warranty of any kind, express or implied. " +
                 "The developer is not liable for any damages arising from the use of this app, " +
                 "including but not limited to missed alarms, failed disconnections, or any " +
                 "disruption to device functionality."
@@ -193,13 +191,13 @@ fun TermsOfServiceScreen(onBack: () -> Unit) {
             LegalSection("Device Admin") {
                 "If you grant Device Admin privileges to this app for the screen-off feature, " +
                 "you can revoke them at any time via:\n" +
-                "Settings > Security > Device admin apps > BT Curfew\n\n" +
+                "Settings > Security > Device admin apps > SleepBT\n\n" +
                 "The app only uses the force-lock policy and does not set passwords, " +
                 "wipe data, or perform any other admin actions."
             }
 
             LegalSection("Intellectual Property") {
-                "© 2026 Anush Kumar. All rights reserved.\n\n" +
+                "© 2026 DreamSync. All rights reserved.\n\n" +
                 "This app and its source code are the property of the developer. " +
                 "Redistribution without permission is not authorized."
             }

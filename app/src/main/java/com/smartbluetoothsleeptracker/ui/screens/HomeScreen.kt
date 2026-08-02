@@ -21,9 +21,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import android.view.HapticFeedbackConstants
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,12 +48,15 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val haptic = LocalHapticFeedback.current
+    val view = LocalView.current
     val hapticEnabled = state.settings.hapticFeedbackEnabled
 
     // Helper to conditionally perform haptic feedback
-    fun doHaptic(type: HapticFeedbackType = HapticFeedbackType.LongPress) {
-        if (hapticEnabled) haptic.performHapticFeedback(type)
+    fun doHaptic(type: Int = HapticFeedbackConstants.LONG_PRESS) {
+        if (hapticEnabled) {
+            view.isHapticFeedbackEnabled = true
+            view.performHapticFeedback(type, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+        }
     }
 
     Column(
@@ -61,10 +64,10 @@ fun HomeScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .padding(
-                top = WindowInsets.systemBars.asPaddingValues().calculateTopPadding() + 16.dp,
+                top = 8.dp,
                 bottom = 16.dp,
-                start = 24.dp,
-                end = 24.dp
+                start = 16.dp,
+                end = 16.dp
             ),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -94,8 +97,9 @@ fun HomeScreen(
         } else {
             RotaryDial(
                 minutes = state.selectedMinutes,
-                onMinutesChange = { viewModel.setMinutes(it) },
-                haptic = haptic,
+                onMinutesChange = { viewModel.setMinutesEphemeral(it) },
+                onMinutesChangeFinished = { viewModel.saveMinutes(it) },
+                view = view,
                 hapticEnabled = hapticEnabled
             )
         }
@@ -250,7 +254,17 @@ private fun ConnectionStatusBar(
 
 @Composable
 private fun CooldownBanner(expiresAt: Long, onAllowReconnect: () -> Unit) {
-    val remaining = (expiresAt - System.currentTimeMillis()).coerceAtLeast(0) / 1000
+    var currentTime by remember(expiresAt) { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(expiresAt) {
+        while (System.currentTimeMillis() < expiresAt) {
+            currentTime = System.currentTimeMillis()
+            kotlinx.coroutines.delay(500)
+        }
+        currentTime = System.currentTimeMillis()
+    }
+
+    val remaining = ((expiresAt - currentTime).coerceAtLeast(0) + 999) / 1000
 
     Row(
         modifier = Modifier
@@ -292,16 +306,19 @@ private fun CountdownDisplay(remainingMs: Long, totalDurationMs: Long) {
         (remainingMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f)
     } else 1f
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         Box(
-            modifier = Modifier.size(280.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .aspectRatio(1f),
             contentAlignment = Alignment.Center
         ) {
             // Background & Progress ring
             Box(
                 Modifier.fillMaxSize().drawWithCache {
-                    val stroke = Stroke(width = 12f, cap = StrokeCap.Round)
-                    val inset = 12f
+                    val strokeWidth = 16.dp.toPx()
+                    val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                    val inset = strokeWidth / 2f
                     val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
                     val topLeft = Offset(inset, inset)
                     onDrawBehind {
@@ -345,7 +362,8 @@ private fun CountdownDisplay(remainingMs: Long, totalDurationMs: Long) {
 private fun RotaryDial(
     minutes: Long,
     onMinutesChange: (Long) -> Unit,
-    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onMinutesChangeFinished: (Long) -> Unit,
+    view: android.view.View,
     hapticEnabled: Boolean = true
 ) {
     val fraction = ((minutes - MIN_MIN).toFloat() / (MAX_MIN - MIN_MIN).toFloat()).coerceIn(0f, 1f)
@@ -355,17 +373,24 @@ private fun RotaryDial(
     var centerPx by remember { mutableStateOf(Offset.Zero) }
     var sizePx by remember { mutableStateOf(0f) }
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    LaunchedEffect(minutes) {
+        lastSnapped = minutes
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         Box(
-            modifier = Modifier.size(280.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .aspectRatio(1f),
             contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .drawWithCache {
-                        val stroke = Stroke(width = 20f, cap = StrokeCap.Round)
-                        val inset = 20f / 2f
+                        val strokeWidth = 24.dp.toPx()
+                        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                        val inset = strokeWidth / 2f
                         val arcRect = Size(size.width - inset * 2, size.height - inset * 2)
                         val topLeft = Offset(inset, inset)
                         centerPx = Offset(size.width / 2f, size.height / 2f)
@@ -389,26 +414,47 @@ private fun RotaryDial(
                                 val thumbRad = Math.toRadians((DIAL_START + sweepAngle).toDouble())
                                 val tx = centerPx.x + sizePx * cos(thumbRad).toFloat()
                                 val ty = centerPx.y + sizePx * sin(thumbRad).toFloat()
-                                drawCircle(Color.White, 14f, Offset(tx, ty))
-                                drawCircle(AccentBlue, 8f, Offset(tx, ty))
+                                drawCircle(Color.White, 16.dp.toPx(), Offset(tx, ty))
+                                drawCircle(AccentBlue, 10.dp.toPx(), Offset(tx, ty))
                             }
                         }
                     }
                     .pointerInput(Unit) {
-                        detectDragGestures { change, _ ->
-                            change.consume()
-                            val dx = change.position.x - centerPx.x
-                            val dy = change.position.y - centerPx.y
-                            val rawAngle = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
-                            val dialAngle = ((rawAngle.toFloat() - DIAL_START + 360f) % 360f).coerceIn(0f, DIAL_SWEEP)
-                            val frac = dialAngle / DIAL_SWEEP
-                            val snapped = (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
-                            if (snapped != lastSnapped) {
-                                lastSnapped = snapped
-                                if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        detectDragGestures(
+                            onDragEnd = {
+                                onMinutesChangeFinished(lastSnapped)
+                            },
+                            onDragCancel = {
+                                onMinutesChangeFinished(lastSnapped)
+                            },
+                            onDrag = { change, _ ->
+                                change.consume()
+                                val dx = change.position.x - centerPx.x
+                                val dy = change.position.y - centerPx.y
+                                val rawAngle = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
+                                val snapped = if (rawAngle > 45.0 && rawAngle < 135.0) {
+                                    if (rawAngle > 90.0) MIN_MIN else MAX_MIN
+                                } else {
+                                    val dialAngle = ((rawAngle.toFloat() - DIAL_START + 360f) % 360f).coerceIn(0f, DIAL_SWEEP)
+                                    val frac = dialAngle / DIAL_SWEEP
+                                    (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
+                                }
+                                val isJump = kotlin.math.abs(snapped - lastSnapped) > (MAX_MIN - MIN_MIN) / 2
+                                val finalSnapped = if (isJump) {
+                                    if (lastSnapped < (MAX_MIN - MIN_MIN) / 2) MIN_MIN else MAX_MIN
+                                } else {
+                                    snapped
+                                }
+                                if (finalSnapped != lastSnapped) {
+                                    lastSnapped = finalSnapped
+                                    if (hapticEnabled) {
+                                        view.isHapticFeedbackEnabled = true
+                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                    }
+                                }
+                                onMinutesChange(finalSnapped)
                             }
-                            onMinutesChange(snapped)
-                        }
+                        )
                     }
             )
 
@@ -448,8 +494,12 @@ private fun RotaryDial(
                         )
                         .clip(RoundedCornerShape(12.dp))
                         .clickable {
-                            if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            if (hapticEnabled) {
+                                view.isHapticFeedbackEnabled = true
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                            }
                             onMinutesChange(preset)
+                            onMinutesChangeFinished(preset)
                         }
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {

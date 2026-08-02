@@ -24,6 +24,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.smartbluetoothsleeptracker.R
 import com.smartbluetoothsleeptracker.ui.theme.*
 
 enum class OnboardingStep { TOS, NOTIFICATION, BLUETOOTH, BATTERY, DONE }
@@ -109,49 +114,46 @@ private fun TosStep(
         modifier = Modifier.fillMaxWidth().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(
-            Icons.Rounded.NightsStay,
-            contentDescription = null,
-            tint = AccentBlue,
-            modifier = Modifier.size(64.dp)
+        // App logo or icon
+        Image(
+            painter = painterResource(id = R.mipmap.ic_launcher),
+            contentDescription = "SleepBT Logo",
+            modifier = Modifier
+                .size(80.dp)
+                .clip(CircleShape)
         )
         Spacer(Modifier.height(24.dp))
         Text(
-            "BT Curfew",
-            style = MaterialTheme.typography.displaySmall,
+            "Welcome to SleepBT",
+            style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Black,
-            color = TextPrimary
+            color = TextPrimary,
+            textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "Sleep timer for Bluetooth audio",
+            "Your smart Bluetooth sleep timer",
             style = MaterialTheme.typography.bodyLarge,
             color = TextSecondary,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(32.dp))
 
-        // ToS text
+        // Terms box
         Surface(
-            color = Surface2,
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
+            color = Surface2.copy(alpha = 0.5f),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, Surface3)
         ) {
-            Column(Modifier.padding(20.dp)) {
-                Text("Terms of Use", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "This app disconnects Bluetooth devices on a timer. It uses reflection-based APIs " +
-                    "and optional Shizuku for privileged control. The health tab provides duration-based " +
-                    "estimates only — not medical advice. This app is not distributed on the Play Store.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                    lineHeight = 18.sp
-                )
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                TermRow(Icons.Rounded.Security, "Privacy First", "100% offline. No data leaves your device.")
+                TermRow(Icons.Rounded.HealthAndSafety, "Health Data", "Duration estimates are not medical advice.")
+                TermRow(Icons.Rounded.Build, "System APIs", "Uses advanced system reflection for Bluetooth control.")
             }
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(32.dp))
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -242,7 +244,7 @@ private fun BatteryStep(onRequest: () -> Unit, onSkip: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         Text(
             "Some phone manufacturers aggressively kill background apps. " +
-            "Exempting BT Curfew from battery optimization ensures your sleep timer " +
+            "Exempting SleepBT from battery optimization ensures your sleep timer " +
             "keeps running even when your screen is off.",
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary,
@@ -261,6 +263,23 @@ private fun BatteryStep(onRequest: () -> Unit, onSkip: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         TextButton(onClick = onSkip) {
             Text("Skip for now", color = TextTertiary)
+        }
+    }
+}
+
+@Composable
+private fun TermRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, desc: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier.size(40.dp).background(Surface3, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Text(desc, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         }
     }
 }
