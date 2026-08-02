@@ -11,9 +11,9 @@ import com.smartbluetoothsleeptracker.service.TimerService
 
 object AppNotifications {
 
-    const val CHANNEL_TIMER = "btcurfew_timer"
-    const val CHANNEL_ALERTS = "btcurfew_alerts"
-    const val CHANNEL_COOLDOWN = "btcurfew_cooldown"
+    const val CHANNEL_TIMER = "sleepbt_timer"
+    const val CHANNEL_ALERTS = "sleepbt_alerts"
+    const val CHANNEL_COOLDOWN = "sleepbt_cooldown"
 
     const val NOTIF_TIMER = 1
     const val NOTIF_WARNING = 2

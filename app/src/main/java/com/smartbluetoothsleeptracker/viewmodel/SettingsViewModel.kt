@@ -12,8 +12,8 @@ import android.app.Application
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.smartbluetoothsleeptracker.BTCurfewApp
-import com.smartbluetoothsleeptracker.core.screen.BTCurfewDeviceAdmin
+import com.smartbluetoothsleeptracker.SleepBTApp
+import com.smartbluetoothsleeptracker.core.screen.SleepBTDeviceAdmin
 import com.smartbluetoothsleeptracker.data.prefs.AppSettings
 import com.smartbluetoothsleeptracker.service.MediaListenerService
 import kotlinx.coroutines.flow.*
@@ -35,7 +35,7 @@ data class SettingsUiState(
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val app = application as BTCurfewApp
+    private val app = application as SleepBTApp
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 

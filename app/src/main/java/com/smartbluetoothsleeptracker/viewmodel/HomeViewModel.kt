@@ -7,7 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.smartbluetoothsleeptracker.BTCurfewApp
+import com.smartbluetoothsleeptracker.SleepBTApp
 import com.smartbluetoothsleeptracker.core.bluetooth.ConnectedDevice
 import com.smartbluetoothsleeptracker.core.bluetooth.CooldownState
 import com.smartbluetoothsleeptracker.data.prefs.AppSettings
@@ -27,18 +27,18 @@ data class HomeUiState(
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val app = application as BTCurfewApp
+    private val app = application as SleepBTApp
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
 
     private val tickReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                "com.btcurfew.TICK" -> {
+                "com.sleepbt.TICK" -> {
                     val remaining = intent.getLongExtra("remaining", 0L)
                     _state.update { it.copy(remainingMs = remaining, isTimerRunning = remaining > 0) }
                 }
-                "com.btcurfew.TIMER_END" -> {
+                "com.sleepbt.TIMER_END" -> {
                     _state.update { it.copy(isTimerRunning = false, remainingMs = 0L) }
                 }
             }
@@ -48,8 +48,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Register tick receiver
         val filter = IntentFilter().apply {
-            addAction("com.btcurfew.TICK")
-            addAction("com.btcurfew.TIMER_END")
+            addAction("com.sleepbt.TICK")
+            addAction("com.sleepbt.TIMER_END")
         }
         application.registerReceiver(tickReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
 

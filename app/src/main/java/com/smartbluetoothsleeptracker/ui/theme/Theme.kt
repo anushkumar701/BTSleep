@@ -56,7 +56,7 @@ private val LightColorScheme = lightColorScheme(
 )
 
 @Composable
-fun BTCurfewTheme(
+fun SleepBTTheme(
     themeMode: String = "DARK",
     content: @Composable () -> Unit
 ) {

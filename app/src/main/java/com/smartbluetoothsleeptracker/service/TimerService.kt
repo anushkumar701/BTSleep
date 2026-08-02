@@ -10,7 +10,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.ServiceCompat
-import com.smartbluetoothsleeptracker.BTCurfewApp
+import com.smartbluetoothsleeptracker.SleepBTApp
 import com.smartbluetoothsleeptracker.core.bluetooth.DisconnectResult
 import com.smartbluetoothsleeptracker.core.notification.AppNotifications
 import com.smartbluetoothsleeptracker.core.playback.FadeResult
@@ -25,11 +25,11 @@ class TimerService : Service() {
     companion object {
         private const val TAG = "TimerService"
 
-        const val ACTION_START = "com.btcurfew.START"
-        const val ACTION_CANCEL = "com.btcurfew.CANCEL"
-        const val ACTION_EXTEND = "com.btcurfew.EXTEND"
-        const val ACTION_END_NOW = "com.btcurfew.END_NOW"
-        const val ACTION_ALLOW_RECONNECT = "com.btcurfew.ALLOW_RECONNECT"
+        const val ACTION_START = "com.sleepbt.START"
+        const val ACTION_CANCEL = "com.sleepbt.CANCEL"
+        const val ACTION_EXTEND = "com.sleepbt.EXTEND"
+        const val ACTION_END_NOW = "com.sleepbt.END_NOW"
+        const val ACTION_ALLOW_RECONNECT = "com.sleepbt.ALLOW_RECONNECT"
 
         const val EXTRA_MINUTES = "minutes"
         const val EXTRA_TARGETS = "targets" // comma-separated MAC addresses
@@ -56,7 +56,7 @@ class TimerService : Service() {
     private var sessionId = 0L
     private var warningFired = false
 
-    private val app get() = application as BTCurfewApp
+    private val app get() = application as SleepBTApp
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -151,7 +151,7 @@ class TimerService : Service() {
                 }
 
                 // Broadcast remaining time for UI
-                sendBroadcast(Intent("com.btcurfew.TICK").apply {
+                sendBroadcast(Intent("com.sleepbt.TICK").apply {
                     putExtra("remaining", remaining)
                     setPackage(packageName)
                 })
@@ -266,7 +266,7 @@ class TimerService : Service() {
             releaseWakeLock()
 
             stopForeground(STOP_FOREGROUND_REMOVE)
-            sendBroadcast(Intent("com.btcurfew.TIMER_END").setPackage(packageName))
+            sendBroadcast(Intent("com.sleepbt.TIMER_END").setPackage(packageName))
         }
     }
 
@@ -288,7 +288,7 @@ class TimerService : Service() {
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
-        sendBroadcast(Intent("com.btcurfew.TIMER_END").setPackage(packageName))
+        sendBroadcast(Intent("com.sleepbt.TIMER_END").setPackage(packageName))
         Log.i(TAG, "Timer cancelled")
     }
 
@@ -385,7 +385,7 @@ class TimerService : Service() {
     private fun acquireWakeLock(minutes: Int) {
         releaseWakeLock()
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "btcurfew:timer").apply {
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "sleepbt:timer").apply {
             acquire(minutes * 60_000L + 60_000L) // timer + 1 min buffer
         }
     }

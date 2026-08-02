@@ -23,7 +23,7 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
-        android:name=".BTCurfewApp"
+        android:name=".SleepBTApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -74,7 +74,7 @@
 
         <!-- Device Admin receiver (for lockNow / screen-off) -->
         <receiver
-            android:name=".core.screen.BTCurfewDeviceAdmin"
+            android:name=".core.screen.SleepBTDeviceAdmin"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data

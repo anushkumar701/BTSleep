@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "btcurfew_prefs")
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "sleepbt_prefs")
 
 data class AppSettings(
     // Timer

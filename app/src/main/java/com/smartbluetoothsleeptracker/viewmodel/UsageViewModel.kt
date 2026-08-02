@@ -3,7 +3,7 @@ package com.smartbluetoothsleeptracker.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.smartbluetoothsleeptracker.BTCurfewApp
+import com.smartbluetoothsleeptracker.SleepBTApp
 import com.smartbluetoothsleeptracker.data.db.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -30,7 +30,7 @@ data class UsageUiState(
 
 class UsageViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val app = application as BTCurfewApp
+    private val app = application as SleepBTApp
     private val _state = MutableStateFlow(UsageUiState())
     val state: StateFlow<UsageUiState> = _state.asStateFlow()
 

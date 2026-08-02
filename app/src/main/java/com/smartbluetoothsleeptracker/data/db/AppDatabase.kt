@@ -31,7 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "btcurfew.db"
+                    "sleepbt.db"
                 )
                     .fallbackToDestructiveMigration()
                     .build()

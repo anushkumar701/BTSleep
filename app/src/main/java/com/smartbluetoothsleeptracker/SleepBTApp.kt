@@ -9,7 +9,7 @@ import com.smartbluetoothsleeptracker.core.screen.ScreenController
 import com.smartbluetoothsleeptracker.data.db.AppDatabase
 import com.smartbluetoothsleeptracker.data.prefs.AppPrefs
 
-class BTCurfewApp : Application() {
+class SleepBTApp : Application() {
 
     lateinit var db: AppDatabase
     lateinit var prefs: AppPrefs

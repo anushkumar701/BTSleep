@@ -6,7 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.smartbluetoothsleeptracker.BTCurfewApp
+import com.smartbluetoothsleeptracker.SleepBTApp
 
 class BluetoothReceiver : BroadcastReceiver() {
     companion object {
@@ -15,7 +15,7 @@ class BluetoothReceiver : BroadcastReceiver() {
 
     @SuppressLint("MissingPermission")
     override fun onReceive(context: Context, intent: Intent) {
-        val app = context.applicationContext as? BTCurfewApp ?: return
+        val app = context.applicationContext as? SleepBTApp ?: return
 
         when (intent.action) {
             BluetoothDevice.ACTION_ACL_CONNECTED -> {

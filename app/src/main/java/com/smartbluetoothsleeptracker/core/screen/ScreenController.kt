@@ -21,7 +21,7 @@ class ScreenController(private val context: Context) {
      * Whether this app is currently a Device Admin.
      */
     fun isDeviceAdminActive(): Boolean {
-        return dpm.isAdminActive(BTCurfewDeviceAdmin.componentName(context))
+        return dpm.isAdminActive(SleepBTDeviceAdmin.componentName(context))
     }
 
     /**

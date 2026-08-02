@@ -11,13 +11,13 @@ import android.util.Log
  * The user must manually grant Device Admin via:
  *   Settings > Security > Device admin apps > SleepBT
  */
-class BTCurfewDeviceAdmin : DeviceAdminReceiver() {
+class SleepBTDeviceAdmin : DeviceAdminReceiver() {
 
     companion object {
         private const val TAG = "DeviceAdmin"
 
         fun componentName(context: Context): ComponentName =
-            ComponentName(context, BTCurfewDeviceAdmin::class.java)
+            ComponentName(context, SleepBTDeviceAdmin::class.java)
     }
 
     override fun onEnabled(context: Context, intent: Intent) {

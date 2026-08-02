@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,7 +32,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import com.smartbluetoothsleeptracker.R
 import com.smartbluetoothsleeptracker.BuildConfig
-import com.smartbluetoothsleeptracker.core.screen.BTCurfewDeviceAdmin
+import com.smartbluetoothsleeptracker.core.screen.SleepBTDeviceAdmin
 import com.smartbluetoothsleeptracker.ui.theme.*
 import com.smartbluetoothsleeptracker.viewmodel.PermissionStatus
 import com.smartbluetoothsleeptracker.viewmodel.SettingsViewModel
@@ -107,7 +108,7 @@ fun SettingsScreen(
         item { Spacer(Modifier.height(8.dp)); SectionHeader("Playback Control") }
         item {
             SettingToggle(
-                icon = Icons.Rounded.VolumeDown,
+                icon = Icons.AutoMirrored.Rounded.VolumeDown,
                 title = "Stop Playback on Timer End",
                 subtitle = "Gradually fade volume to zero before disconnecting",
                 checked = s.playbackStopEnabled,
@@ -188,7 +189,7 @@ fun SettingsScreen(
                 EnableButton("Enable Device Admin") {
                     val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                         putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN,
-                            BTCurfewDeviceAdmin.componentName(context))
+                            SleepBTDeviceAdmin.componentName(context))
                         putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
                             "SleepBT needs Device Admin to lock the screen when the sleep timer ends.")
                     }

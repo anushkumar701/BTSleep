@@ -12,7 +12,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartbluetoothsleeptracker.data.prefs.AppSettings
 import com.smartbluetoothsleeptracker.ui.navigation.AppNavigation
 import com.smartbluetoothsleeptracker.ui.screens.OnboardingScreen
-import com.smartbluetoothsleeptracker.ui.theme.BTCurfewTheme
+import com.smartbluetoothsleeptracker.ui.theme.SleepBTTheme
 import com.smartbluetoothsleeptracker.viewmodel.HomeViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val app = application as BTCurfewApp
+        val app = application as SleepBTApp
         val homeVm = ViewModelProvider(this)[HomeViewModel::class.java]
 
         setContent {
@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
 
             if (settingsState != null) {
                 val settings = settingsState!!
-                BTCurfewTheme(themeMode = settings.themeMode) {
+                SleepBTTheme(themeMode = settings.themeMode) {
                     if (!settings.onboardingComplete) {
                         OnboardingScreen(
                             onComplete = {
