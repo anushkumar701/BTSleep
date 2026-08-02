@@ -8,13 +8,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.smartbluetoothsleeptracker.data.prefs.AppPrefs
 import com.smartbluetoothsleeptracker.data.prefs.AppSettings
 import com.smartbluetoothsleeptracker.ui.navigation.AppNavigation
 import com.smartbluetoothsleeptracker.ui.screens.OnboardingScreen
+import com.smartbluetoothsleeptracker.ui.screens.OnboardingStep
 import com.smartbluetoothsleeptracker.ui.theme.SleepBTTheme
 import com.smartbluetoothsleeptracker.viewmodel.HomeViewModel
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -34,13 +34,24 @@ class MainActivity : ComponentActivity() {
 
             if (settingsState != null) {
                 val settings = settingsState!!
+                val tosValid = settings.tosAcceptedTimestamp > 0L && 
+                               settings.tosAcceptedVersion == AppPrefs.CURRENT_TOS_VERSION
+
                 SleepBTTheme(themeMode = settings.themeMode) {
-                    if (!settings.onboardingComplete) {
+                    if (!tosValid || !settings.onboardingComplete) {
                         OnboardingScreen(
+                            initialStep = if (!tosValid) OnboardingStep.TOS else OnboardingStep.NOTIFICATION,
+                            onTosAccepted = {
+                                scope.launch {
+                                    app.prefs.setTosAccepted(
+                                        ts = System.currentTimeMillis(),
+                                        version = AppPrefs.CURRENT_TOS_VERSION
+                                    )
+                                }
+                            },
                             onComplete = {
                                 scope.launch {
                                     app.prefs.setOnboardingComplete(true)
-                                    app.prefs.setTosAccepted(System.currentTimeMillis())
                                 }
                             }
                         )

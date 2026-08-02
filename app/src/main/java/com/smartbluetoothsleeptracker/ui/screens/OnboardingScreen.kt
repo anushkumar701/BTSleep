@@ -1,37 +1,38 @@
 package com.smartbluetoothsleeptracker.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
-import androidx.compose.material.icons.automirrored.rounded.VolumeOff
-import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
-import androidx.compose.ui.res.painterResource
 import com.smartbluetoothsleeptracker.R
 import com.smartbluetoothsleeptracker.ui.theme.*
 
@@ -39,10 +40,12 @@ enum class OnboardingStep { TOS, NOTIFICATION, BLUETOOTH, BATTERY, DONE }
 
 @Composable
 fun OnboardingScreen(
+    initialStep: OnboardingStep = OnboardingStep.TOS,
+    onTosAccepted: () -> Unit = {},
     onComplete: () -> Unit
 ) {
     val context = LocalContext.current
-    var step by remember { mutableStateOf(OnboardingStep.TOS) }
+    var step by remember { mutableStateOf(initialStep) }
     var tosChecked by remember { mutableStateOf(false) }
 
     val notifLauncher = rememberLauncherForActivityResult(
@@ -54,7 +57,13 @@ fun OnboardingScreen(
     ) { _ -> step = OnboardingStep.BATTERY }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(DeepBlack),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(Color(0xFF0D111A), Color(0xFF07090F), Color(0xFF040508))
+                )
+            ),
         contentAlignment = Alignment.Center
     ) {
         AnimatedContent(
@@ -69,7 +78,10 @@ fun OnboardingScreen(
                 OnboardingStep.TOS -> TosStep(
                     checked = tosChecked,
                     onCheckedChange = { tosChecked = it },
-                    onContinue = { step = OnboardingStep.NOTIFICATION }
+                    onContinue = {
+                        onTosAccepted()
+                        step = OnboardingStep.NOTIFICATION
+                    }
                 )
                 OnboardingStep.NOTIFICATION -> PermissionStep(
                     icon = Icons.Rounded.Notifications,
@@ -114,20 +126,24 @@ private fun TosStep(
     onCheckedChange: (Boolean) -> Unit,
     onContinue: () -> Unit
 ) {
-    var showTermsModal by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val termsContent = remember { loadLocalTermsAsset(context) }
 
     Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Ambient Logo Container
+        Spacer(Modifier.height(12.dp))
+
+        // App Logo centered near top
         Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(top = 8.dp)
+            contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
-                    .size(96.dp)
+                    .size(72.dp)
                     .background(
                         Brush.radialGradient(
                             colors = listOf(AccentBlue.copy(0.35f), Color.Transparent)
@@ -139,86 +155,85 @@ private fun TosStep(
                 painter = painterResource(id = R.mipmap.ic_launcher),
                 contentDescription = "SleepBT Logo",
                 modifier = Modifier
-                    .size(80.dp)
+                    .size(56.dp)
                     .clip(CircleShape)
             )
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(8.dp))
 
-        // Version badge
-        Surface(
-            color = AccentBlue.copy(0.12f),
-            shape = RoundedCornerShape(20.dp)
-        ) {
-            Text(
-                "SLEEPBT v1.0",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = AccentBlue,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                letterSpacing = 1.sp
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-
+        // Small App Name & Subtitle
         Text(
-            "Welcome to SleepBT",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Black,
+            "SleepBT",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
             color = TextPrimary,
-            textAlign = TextAlign.Center
+            letterSpacing = 0.5.sp
         )
-        Spacer(Modifier.height(6.dp))
         Text(
-            "Smart Bluetooth sleep timer & health protector",
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary,
-            textAlign = TextAlign.Center
+            "Terms of Service & Privacy Policy",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary
         )
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // Terms box with feature guarantees
-        Surface(
-            color = Surface1,
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, SurfaceBorder)
-        ) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                TermRow(Icons.Rounded.Security, "100% Offline & Private", "No telemetry or network tracking. All data remains on your device.")
-                TermRow(Icons.AutoMirrored.Rounded.VolumeOff, "Smart Playback Fade", "Gradually reduces volume to protect hearing before disconnecting.")
-                TermRow(Icons.Rounded.HealthAndSafety, "Ear Health Insights", "Duration estimates provide safety awareness for daily listening.")
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // View full Terms & Privacy link
-        TextButton(
-            onClick = { showTermsModal = true }
-        ) {
-            Icon(Icons.AutoMirrored.Rounded.MenuBook, null, tint = AccentBlue, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                "Read Full Terms & Privacy Policy",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = AccentBlue
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // Agreement Toggle Card
-        Surface(
-            color = if (checked) AccentBlue.copy(0.08f) else Surface1,
-            shape = RoundedCornerShape(16.dp),
+        // Scrollable Terms & Privacy Content Box with Fade Edge Indicators
+        Box(
             modifier = Modifier
+                .weight(1f)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
+                .background(Surface1)
+                .border(BorderStroke(1.dp, SurfaceBorder), RoundedCornerShape(16.dp))
+        ) {
+            val scrollState = rememberScrollState()
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
+            ) {
+                RenderTermsMarkdown(termsContent)
+            }
+
+            // Top Fade Edge Indicator
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(20.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Surface1, Color.Transparent)
+                        )
+                    )
+            )
+
+            // Bottom Fade Edge Indicator
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(24.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Surface1)
+                        )
+                    )
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Agreement Checkbox Card
+        Surface(
+            color = if (checked) AccentBlue.copy(0.1f) else Surface1,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
                 .clickable { onCheckedChange(!checked) },
             border = BorderStroke(
                 1.dp,
@@ -227,74 +242,128 @@ private fun TosStep(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
                 Checkbox(
                     checked = checked,
                     onCheckedChange = onCheckedChange,
                     colors = CheckboxDefaults.colors(
                         checkedColor = AccentBlue,
-                        uncheckedColor = TextTertiary
+                        uncheckedColor = TextTertiary,
+                        checkmarkColor = Color.White
                     )
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "I agree to the Terms of Service & Privacy Policy",
+                    "I have read and agree to the Terms of Service and Privacy Policy",
                     style = MaterialTheme.typography.bodySmall,
-                    fontWeight = if (checked) FontWeight.Bold else FontWeight.Medium,
-                    color = if (checked) TextPrimary else TextSecondary
+                    fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
+                    color = if (checked) TextPrimary else Color(0xFFCCCCCC),
+                    lineHeight = 18.sp
                 )
             }
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(14.dp))
 
+        // Primary Continue Button
         Button(
             onClick = onContinue,
             enabled = checked,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = AccentBlue,
-                disabledContainerColor = Surface3
+                disabledContainerColor = Surface3,
+                contentColor = Color.White,
+                disabledContentColor = TextTertiary
+            ),
+            elevation = ButtonDefaults.buttonElevation(
+                defaultElevation = if (checked) 6.dp else 0.dp
             )
         ) {
-            Text("Agree & Get Started", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(
+                "Agree & Continue",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
         }
-    }
 
-    // Modal Sheet for Terms & Privacy
-    if (showTermsModal) {
-        AlertDialog(
-            onDismissRequest = { showTermsModal = false },
-            confirmButton = {
-                TextButton(onClick = { showTermsModal = false }) {
-                    Text("Close", fontWeight = FontWeight.Bold, color = AccentBlue)
-                }
-            },
-            title = {
-                Text("Terms & Privacy Policy", fontWeight = FontWeight.Bold, color = TextPrimary)
-            },
-            text = {
-                Column(
-                    Modifier.heightIn(max = 350.dp)
-                ) {
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun RenderTermsMarkdown(content: String) {
+    val lines = content.split("\n")
+    Column(
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        for (line in lines) {
+            val trimmed = line.trim()
+            when {
+                trimmed.startsWith("# ") -> {
                     Text(
-                        "• Offline Operation: SleepBT runs entirely on your device with no remote analytics.\n\n" +
-                        "• Bluetooth Control: Uses system reflection APIs to disconnect audio devices on timer expiry.\n\n" +
-                        "• Ear Health: Listening duration metrics are for personal awareness and do not constitute medical advice.\n\n" +
-                        "• Screen Locking: Optional feature requiring Device Admin permission.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        lineHeight = 20.sp
+                        text = trimmed.removePrefix("# ").trim(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentBlue,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                     )
                 }
-            },
-            containerColor = Surface1,
-            shape = RoundedCornerShape(20.dp)
-        )
+                trimmed.startsWith("### ") -> {
+                    Text(
+                        text = trimmed.removePrefix("### ").trim(),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                    )
+                }
+                trimmed.startsWith("---") -> {
+                    HorizontalDivider(
+                        color = SurfaceBorder,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
+                trimmed.startsWith("* ") -> {
+                    Row(
+                        modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text("• ", color = AccentBlue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(
+                            text = trimmed.removePrefix("* ").trim(),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = Color(0xFFE6E6E6),
+                                lineHeight = 20.sp,
+                                fontSize = 13.sp
+                            )
+                        )
+                    }
+                }
+                trimmed.isNotEmpty() -> {
+                    Text(
+                        text = trimmed,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = Color(0xFFE6E6E6),
+                            lineHeight = 20.sp,
+                            fontSize = 13.sp
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun loadLocalTermsAsset(context: Context): String {
+    return try {
+        context.assets.open("terms_and_privacy.md").bufferedReader().use { it.readText() }
+    } catch (e: Exception) {
+        "SleepBT Terms of Service & Privacy Policy\n\n100% On-Device & Offline Operation. No analytics or server tracking."
     }
 }
 
@@ -307,11 +376,15 @@ private fun PermissionStep(
     onSkip: () -> Unit
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(32.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            modifier = Modifier.size(80.dp).background(AccentBlue.copy(0.12f), CircleShape),
+            modifier = Modifier
+                .size(80.dp)
+                .background(AccentBlue.copy(0.12f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(40.dp))
@@ -340,11 +413,15 @@ private fun PermissionStep(
 @Composable
 private fun BatteryStep(onRequest: () -> Unit, onSkip: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(32.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            modifier = Modifier.size(80.dp).background(StatusOrange.copy(0.12f), CircleShape),
+            modifier = Modifier
+                .size(80.dp)
+                .background(StatusOrange.copy(0.12f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(Icons.Rounded.BatteryAlert, null, tint = StatusOrange, modifier = Modifier.size(40.dp))
@@ -373,23 +450,6 @@ private fun BatteryStep(onRequest: () -> Unit, onSkip: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         TextButton(onClick = onSkip) {
             Text("Skip for now", color = TextTertiary)
-        }
-    }
-}
-
-@Composable
-private fun TermRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, desc: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier.size(40.dp).background(Surface3, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(20.dp))
-        }
-        Spacer(Modifier.width(16.dp))
-        Column {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Text(desc, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
         }
     }
 }

@@ -45,6 +45,7 @@ data class AppSettings(
     // Onboarding
     val onboardingComplete: Boolean = false,
     val tosAcceptedTimestamp: Long = 0L,
+    val tosAcceptedVersion: String = "",
 
     // Persisted timer state (survives process death)
     val timerEndWallClock: Long? = null,
@@ -76,7 +77,8 @@ class AppPrefs(private val context: Context) {
                 foregroundServiceEnabled= prefs[FG_SERVICE] ?: true,
                 themeMode               = prefs[THEME_MODE] ?: "DARK",
                 onboardingComplete      = prefs[ONBOARDING_COMPLETE] ?: false,
-                tosAcceptedTimestamp     = prefs[TOS_TIMESTAMP] ?: 0L,
+                tosAcceptedTimestamp    = prefs[TOS_TIMESTAMP] ?: 0L,
+                tosAcceptedVersion      = prefs[TOS_VERSION] ?: "",
                 timerEndWallClock       = prefs[TIMER_END_WALL]?.takeIf { it > 0L },
                 timerPausedRemaining    = prefs[TIMER_PAUSED]?.takeIf { it > 0L },
                 timerTargetDevices      = prefs[TIMER_TARGETS] ?: "",
@@ -100,7 +102,10 @@ class AppPrefs(private val context: Context) {
     suspend fun setForegroundService(on: Boolean) = ds.edit { it[FG_SERVICE] = on }
     suspend fun setThemeMode(mode: String)        = ds.edit { it[THEME_MODE] = mode }
     suspend fun setOnboardingComplete(done: Boolean) = ds.edit { it[ONBOARDING_COMPLETE] = done }
-    suspend fun setTosAccepted(ts: Long)          = ds.edit { it[TOS_TIMESTAMP] = ts }
+    suspend fun setTosAccepted(ts: Long, version: String = CURRENT_TOS_VERSION) = ds.edit {
+        it[TOS_TIMESTAMP] = ts
+        it[TOS_VERSION] = version
+    }
 
     // Timer persistence
     suspend fun setTimerEnd(ms: Long?)            = ds.edit { if (ms == null) it.remove(TIMER_END_WALL) else it[TIMER_END_WALL] = ms }
@@ -120,6 +125,8 @@ class AppPrefs(private val context: Context) {
     }
 
     companion object {
+        const val CURRENT_TOS_VERSION = "1.0.0"
+
         val SELECTED_MINUTES    = longPreferencesKey("selected_minutes")
         val EXTEND_MINUTES      = intPreferencesKey("extend_minutes")
         val RECONNECT_BLOCKER   = booleanPreferencesKey("reconnect_blocker")
@@ -134,6 +141,7 @@ class AppPrefs(private val context: Context) {
         val THEME_MODE          = stringPreferencesKey("theme_mode")
         val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
         val TOS_TIMESTAMP       = longPreferencesKey("tos_timestamp")
+        val TOS_VERSION         = stringPreferencesKey("tos_version")
         val TIMER_END_WALL      = longPreferencesKey("timer_end_wall")
         val TIMER_PAUSED        = longPreferencesKey("timer_paused")
         val TIMER_TARGETS       = stringPreferencesKey("timer_targets")
