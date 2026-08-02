@@ -9,21 +9,39 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "sleepbt_prefs")
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "btcurfew_prefs")
 
 data class AppSettings(
+    // Timer
     val selectedMinutes: Long = 30L,
-    val extendMinutes: Int = 10,
-    val batterySaverEnabled: Boolean = false,
-    val idleMinutes: Int = 15,
-    val notificationsEnabled: Boolean = true,
-    val themeMode: String = "DARK",
-    val foregroundServiceEnabled: Boolean = true,
+    val extendMinutes: Int = 5,
+
+    // Bluetooth
     val reconnectBlockerEnabled: Boolean = true,
+    val cooldownSeconds: Int = 30,
+    val shizukuEnabled: Boolean = false,
+
+    // Notifications
+    val sleepAlertsEnabled: Boolean = true,
+    val warningLeadMinutes: Int = 2,
+
+    // Service
+    val foregroundServiceEnabled: Boolean = true,
+
+    // Appearance
+    val themeMode: String = "DARK", // DARK, LIGHT, SYSTEM
+
+    // Onboarding
+    val onboardingComplete: Boolean = false,
+    val tosAcceptedTimestamp: Long = 0L,
+
+    // Persisted timer state (survives process death)
     val timerEndWallClock: Long? = null,
     val timerPausedRemaining: Long? = null,
-    val onboardingComplete: Boolean = false,
-    val privacyAgreed: Boolean = false
+    val timerTargetDevices: String = "", // comma-separated MAC addresses
+    val timerPlannedMinutes: Int = 0,
+    val timerExtendedMinutes: Int = 0,
+    val activeSessionId: Long = 0L
 )
 
 class AppPrefs(private val context: Context) {
@@ -34,55 +52,73 @@ class AppPrefs(private val context: Context) {
         .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
         .map { prefs ->
             AppSettings(
-                selectedMinutes       = prefs[SELECTED_MINUTES] ?: 30L,
-                extendMinutes         = prefs[EXTEND_MINUTES] ?: 10,
-                batterySaverEnabled   = prefs[BATTERY_SAVER] ?: false,
-                idleMinutes           = prefs[IDLE_MINUTES] ?: 15,
-                notificationsEnabled  = prefs[NOTIFICATIONS] ?: true,
-                themeMode             = prefs[THEME_MODE] ?: "DARK",
-                foregroundServiceEnabled = prefs[FG_SERVICE] ?: true,
-                reconnectBlockerEnabled  = prefs[RECONNECT_BLOCKER] ?: true,
-                timerEndWallClock     = prefs[TIMER_END_WALL]?.takeIf { it > 0L },
-                timerPausedRemaining  = prefs[TIMER_PAUSED]?.takeIf { it > 0L },
-                onboardingComplete    = prefs[ONBOARDING_COMPLETE] ?: false,
-                privacyAgreed         = prefs[PRIVACY_AGREED] ?: false
+                selectedMinutes         = prefs[SELECTED_MINUTES] ?: 30L,
+                extendMinutes           = prefs[EXTEND_MINUTES] ?: 5,
+                reconnectBlockerEnabled = prefs[RECONNECT_BLOCKER] ?: true,
+                cooldownSeconds         = prefs[COOLDOWN_SECONDS] ?: 30,
+                shizukuEnabled          = prefs[SHIZUKU_ENABLED] ?: false,
+                sleepAlertsEnabled      = prefs[SLEEP_ALERTS] ?: true,
+                warningLeadMinutes      = prefs[WARNING_LEAD] ?: 2,
+                foregroundServiceEnabled= prefs[FG_SERVICE] ?: true,
+                themeMode               = prefs[THEME_MODE] ?: "DARK",
+                onboardingComplete      = prefs[ONBOARDING_COMPLETE] ?: false,
+                tosAcceptedTimestamp     = prefs[TOS_TIMESTAMP] ?: 0L,
+                timerEndWallClock       = prefs[TIMER_END_WALL]?.takeIf { it > 0L },
+                timerPausedRemaining    = prefs[TIMER_PAUSED]?.takeIf { it > 0L },
+                timerTargetDevices      = prefs[TIMER_TARGETS] ?: "",
+                timerPlannedMinutes     = prefs[TIMER_PLANNED] ?: 0,
+                timerExtendedMinutes    = prefs[TIMER_EXTENDED] ?: 0,
+                activeSessionId         = prefs[ACTIVE_SESSION_ID] ?: 0L
             )
         }
 
-    suspend fun setSelectedMinutes(minutes: Long)  = ds.edit { it[SELECTED_MINUTES] = minutes }
-    suspend fun setExtendMinutes(minutes: Int)      = ds.edit { it[EXTEND_MINUTES] = minutes.coerceIn(5, 60) }
-    suspend fun setBatterySaver(enabled: Boolean)   = ds.edit { it[BATTERY_SAVER] = enabled }
-    suspend fun setIdleMinutes(minutes: Int)        = ds.edit { it[IDLE_MINUTES] = minutes }
-    suspend fun setNotifications(enabled: Boolean)  = ds.edit { it[NOTIFICATIONS] = enabled }
-    suspend fun setThemeMode(mode: String)          = ds.edit { it[THEME_MODE] = mode }
-    suspend fun setForegroundService(enabled: Boolean) = ds.edit { it[FG_SERVICE] = enabled }
-    suspend fun setReconnectBlocker(enabled: Boolean)  = ds.edit { it[RECONNECT_BLOCKER] = enabled }
-    suspend fun setOnboardingComplete(done: Boolean)   = ds.edit { it[ONBOARDING_COMPLETE] = done }
-    suspend fun setPrivacyAgreed(agreed: Boolean)      = ds.edit { it[PRIVACY_AGREED] = agreed }
+    // Setters
+    suspend fun setSelectedMinutes(m: Long)       = ds.edit { it[SELECTED_MINUTES] = m.coerceIn(1, 480) }
+    suspend fun setExtendMinutes(m: Int)          = ds.edit { it[EXTEND_MINUTES] = m.coerceIn(1, 60) }
+    suspend fun setReconnectBlocker(on: Boolean)  = ds.edit { it[RECONNECT_BLOCKER] = on }
+    suspend fun setCooldownSeconds(s: Int)        = ds.edit { it[COOLDOWN_SECONDS] = s.coerceIn(0, 120) }
+    suspend fun setShizukuEnabled(on: Boolean)    = ds.edit { it[SHIZUKU_ENABLED] = on }
+    suspend fun setSleepAlerts(on: Boolean)       = ds.edit { it[SLEEP_ALERTS] = on }
+    suspend fun setWarningLeadMinutes(m: Int)     = ds.edit { it[WARNING_LEAD] = m.coerceIn(1, 10) }
+    suspend fun setForegroundService(on: Boolean) = ds.edit { it[FG_SERVICE] = on }
+    suspend fun setThemeMode(mode: String)        = ds.edit { it[THEME_MODE] = mode }
+    suspend fun setOnboardingComplete(done: Boolean) = ds.edit { it[ONBOARDING_COMPLETE] = done }
+    suspend fun setTosAccepted(ts: Long)          = ds.edit { it[TOS_TIMESTAMP] = ts }
 
-    suspend fun setTimerEnd(wallClockMillis: Long?) = ds.edit {
-        if (wallClockMillis == null) it.remove(TIMER_END_WALL) else it[TIMER_END_WALL] = wallClockMillis
-    }
-    suspend fun setTimerPaused(remainingMillis: Long?) = ds.edit {
-        if (remainingMillis == null) it.remove(TIMER_PAUSED) else it[TIMER_PAUSED] = remainingMillis
-    }
+    // Timer persistence
+    suspend fun setTimerEnd(ms: Long?)            = ds.edit { if (ms == null) it.remove(TIMER_END_WALL) else it[TIMER_END_WALL] = ms }
+    suspend fun setTimerPaused(ms: Long?)         = ds.edit { if (ms == null) it.remove(TIMER_PAUSED) else it[TIMER_PAUSED] = ms }
+    suspend fun setTimerTargets(targets: String)  = ds.edit { it[TIMER_TARGETS] = targets }
+    suspend fun setTimerPlanned(min: Int)         = ds.edit { it[TIMER_PLANNED] = min }
+    suspend fun setTimerExtended(min: Int)        = ds.edit { it[TIMER_EXTENDED] = min }
+    suspend fun setActiveSessionId(id: Long)      = ds.edit { it[ACTIVE_SESSION_ID] = id }
+
     suspend fun clearTimer() = ds.edit {
         it.remove(TIMER_END_WALL)
         it.remove(TIMER_PAUSED)
+        it.remove(TIMER_TARGETS)
+        it.remove(TIMER_PLANNED)
+        it.remove(TIMER_EXTENDED)
+        it.remove(ACTIVE_SESSION_ID)
     }
 
     companion object {
-        val SELECTED_MINUTES      = longPreferencesKey("selected_minutes")
-        val EXTEND_MINUTES        = intPreferencesKey("extend_minutes")
-        val BATTERY_SAVER         = booleanPreferencesKey("battery_saver")
-        val IDLE_MINUTES          = intPreferencesKey("idle_minutes")
-        val NOTIFICATIONS         = booleanPreferencesKey("notifications")
-        val THEME_MODE            = stringPreferencesKey("theme_mode")
-        val FG_SERVICE            = booleanPreferencesKey("fg_service")
-        val RECONNECT_BLOCKER     = booleanPreferencesKey("reconnect_blocker")
-        val TIMER_END_WALL        = longPreferencesKey("timer_end_wall")
-        val TIMER_PAUSED          = longPreferencesKey("timer_paused")
-        val ONBOARDING_COMPLETE   = booleanPreferencesKey("onboarding_complete")
-        val PRIVACY_AGREED        = booleanPreferencesKey("privacy_agreed")
+        val SELECTED_MINUTES    = longPreferencesKey("selected_minutes")
+        val EXTEND_MINUTES      = intPreferencesKey("extend_minutes")
+        val RECONNECT_BLOCKER   = booleanPreferencesKey("reconnect_blocker")
+        val COOLDOWN_SECONDS    = intPreferencesKey("cooldown_seconds")
+        val SHIZUKU_ENABLED     = booleanPreferencesKey("shizuku_enabled")
+        val SLEEP_ALERTS        = booleanPreferencesKey("sleep_alerts")
+        val WARNING_LEAD        = intPreferencesKey("warning_lead")
+        val FG_SERVICE          = booleanPreferencesKey("fg_service")
+        val THEME_MODE          = stringPreferencesKey("theme_mode")
+        val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
+        val TOS_TIMESTAMP       = longPreferencesKey("tos_timestamp")
+        val TIMER_END_WALL      = longPreferencesKey("timer_end_wall")
+        val TIMER_PAUSED        = longPreferencesKey("timer_paused")
+        val TIMER_TARGETS       = stringPreferencesKey("timer_targets")
+        val TIMER_PLANNED       = intPreferencesKey("timer_planned")
+        val TIMER_EXTENDED      = intPreferencesKey("timer_extended")
+        val ACTIVE_SESSION_ID   = longPreferencesKey("active_session_id")
     }
 }

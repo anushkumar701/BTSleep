@@ -1,8 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">SleepBT</string>
-    <string name="widget_control_description">SleepBT Control Widget</string>
-    <string name="widget_minimal_description">SleepBT Status Badge</string>
-    <string name="channel_timer_name">Sleep Timer</string>
-    <string name="channel_alert_name">Sleep Alerts</string>
+    <string name="app_name">BT Curfew</string>
 </resources>

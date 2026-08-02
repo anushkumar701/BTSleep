@@ -1,96 +1,144 @@
 package com.smartbluetoothsleeptracker.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.smartbluetoothsleeptracker.core.bluetooth.BluetoothDisconnector
-import com.smartbluetoothsleeptracker.core.bluetooth.BluetoothMonitor
-import com.smartbluetoothsleeptracker.core.timer.SleepTimerManager
-import com.smartbluetoothsleeptracker.data.prefs.AppPrefs
+import com.smartbluetoothsleeptracker.BTCurfewApp
+import com.smartbluetoothsleeptracker.core.bluetooth.ConnectedDevice
+import com.smartbluetoothsleeptracker.core.bluetooth.CooldownState
+import com.smartbluetoothsleeptracker.data.prefs.AppSettings
+import com.smartbluetoothsleeptracker.service.TimerService
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class HomeUiState(
-    val deviceName: String? = null,
-    val isConnected: Boolean = false,
-    val bluetoothEnabled: Boolean = true,
-    val timerRunning: Boolean = false,
-    val timerPaused: Boolean = false,
-    val remainingMillis: Long = 0L,
-    val totalTimerMillis: Long = 0L,
-    val selectedMinutes: Long = 30L,
-    val blockerActive: Boolean = false,
-    val countdownText: String = "00:00"
+    val settings: AppSettings = AppSettings(),
+    val connectedDevices: List<ConnectedDevice> = emptyList(),
+    val btEnabled: Boolean = false,
+    val isTimerRunning: Boolean = false,
+    val remainingMs: Long = 0L,
+    val cooldown: CooldownState = CooldownState(),
+    val selectedMinutes: Long = 30L
 )
 
-class HomeViewModel(
-    private val timerManager: SleepTimerManager,
-    private val btMonitor: BluetoothMonitor,
-    private val btDisconnector: BluetoothDisconnector,
-    private val prefs: AppPrefs
-) : ViewModel() {
+class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _selectedMinutes = MutableStateFlow(30L)
+    private val app = application as BTCurfewApp
+    private val _state = MutableStateFlow(HomeUiState())
+    val state: StateFlow<HomeUiState> = _state.asStateFlow()
 
-    val state: StateFlow<HomeUiState> = combine(
-        timerManager.state,
-        btMonitor.devices,
-        btMonitor.isEnabled,
-        btDisconnector.blockerState,
-        _selectedMinutes
-    ) { timerState, devices, btEnabled, blockerState, selMin ->
-        val deviceName = devices.firstOrNull()?.name
-        val blockerActive = blockerState.active && System.currentTimeMillis() < blockerState.blockedUntil
-        // Use persisted total when timer is active so arc % stays correct after extend/resume
-        val totalMillis = when {
-            timerState.isRunning && timerState.endWallClock != null ->
-                (timerState.endWallClock - System.currentTimeMillis() + timerState.remainingMillis)
-                    .coerceAtLeast(timerState.remainingMillis)
-            timerState.isPaused && timerState.pausedRemaining != null ->
-                timerState.pausedRemaining
-            else -> selMin * 60_000L
+    private val tickReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                "com.btcurfew.TICK" -> {
+                    val remaining = intent.getLongExtra("remaining", 0L)
+                    _state.update { it.copy(remainingMs = remaining, isTimerRunning = remaining > 0) }
+                }
+                "com.btcurfew.TIMER_END" -> {
+                    _state.update { it.copy(isTimerRunning = false, remainingMs = 0L) }
+                }
+            }
         }
-        HomeUiState(
-            deviceName = deviceName,
-            isConnected = devices.isNotEmpty(),
-            bluetoothEnabled = btEnabled,
-            timerRunning = timerState.isRunning,
-            timerPaused = timerState.isPaused,
-            remainingMillis = timerState.remainingMillis,
-            totalTimerMillis = totalMillis.coerceAtLeast(1L),
-            selectedMinutes = selMin,
-            blockerActive = blockerActive,
-            countdownText = formatCountdown(timerState.remainingMillis)
-        )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeUiState())
+    }
 
     init {
+        // Register tick receiver
+        val filter = IntentFilter().apply {
+            addAction("com.btcurfew.TICK")
+            addAction("com.btcurfew.TIMER_END")
+        }
+        application.registerReceiver(tickReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+
+        // Observe settings
         viewModelScope.launch {
-            val s = prefs.settings.first()
-            _selectedMinutes.value = s.selectedMinutes
+            app.prefs.settings.collect { settings ->
+                _state.update { it.copy(
+                    settings = settings,
+                    selectedMinutes = settings.selectedMinutes,
+                    isTimerRunning = settings.timerEndWallClock != null && settings.timerEndWallClock > System.currentTimeMillis()
+                ) }
+            }
+        }
+
+        // Observe connected devices
+        viewModelScope.launch {
+            app.btMonitor.connectedDevices.collect { devices ->
+                _state.update { it.copy(connectedDevices = devices) }
+            }
+        }
+
+        // Observe BT state
+        viewModelScope.launch {
+            app.btMonitor.btEnabled.collect { enabled ->
+                _state.update { it.copy(btEnabled = enabled) }
+            }
+        }
+
+        // Observe cooldown
+        viewModelScope.launch {
+            app.disconnector.cooldownState.collect { cd ->
+                _state.update { it.copy(cooldown = cd) }
+            }
         }
     }
 
-    fun adjustMinutes(delta: Long) {
-        val current = _selectedMinutes.value
-        val new = (current + delta).coerceIn(5L, 120L)
-        _selectedMinutes.value = new
-        viewModelScope.launch { prefs.setSelectedMinutes(new) }
+    fun setMinutes(m: Long) {
+        _state.update { it.copy(selectedMinutes = m.coerceIn(1, 480)) }
+        viewModelScope.launch { app.prefs.setSelectedMinutes(m) }
     }
 
-    fun setMinutes(minutes: Long) {
-        _selectedMinutes.value = minutes.coerceIn(5L, 120L)
-        viewModelScope.launch { prefs.setSelectedMinutes(minutes) }
+    fun startTimer() {
+        val s = _state.value
+        val targets = s.connectedDevices
+            .filter { it.isFavorite }
+            .ifEmpty { s.connectedDevices } // If no favorites, target all connected
+            .map { it.address }
+            .joinToString(",")
+
+        if (targets.isBlank()) return
+
+        val intent = TimerService.startIntent(
+            getApplication(),
+            s.selectedMinutes.toInt(),
+            targets
+        )
+        androidx.core.content.ContextCompat.startForegroundService(getApplication(), intent)
     }
 
-    fun cancelBlocker() {
-        btDisconnector.clearBlocker()
+    fun cancelTimer() {
+        val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
+            action = TimerService.ACTION_CANCEL
+        }
+        getApplication<Application>().startService(intent)
     }
 
-    private fun formatCountdown(millis: Long): String {
-        val totalSec = (millis / 1000L).coerceAtLeast(0L)
-        val h = totalSec / 3600L
-        val m = (totalSec % 3600L) / 60L
-        val s = totalSec % 60L
-        return if (h > 0L) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+    fun extendTimer() {
+        val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
+            action = TimerService.ACTION_EXTEND
+        }
+        getApplication<Application>().startService(intent)
+    }
+
+    fun endNow() {
+        val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
+            action = TimerService.ACTION_END_NOW
+        }
+        getApplication<Application>().startService(intent)
+    }
+
+    fun allowReconnect() {
+        val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
+            action = TimerService.ACTION_ALLOW_RECONNECT
+        }
+        getApplication<Application>().startService(intent)
+    }
+
+    override fun onCleared() {
+        runCatching { getApplication<Application>().unregisterReceiver(tickReceiver) }
+        super.onCleared()
     }
 }

@@ -1,114 +1,163 @@
 package com.smartbluetoothsleeptracker.core.bluetooth
 
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothProfile
+import android.bluetooth.*
+import android.content.BroadcastReceiver
 import android.content.Context
-import android.media.AudioManager
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import android.content.Intent
+import android.content.IntentFilter
+import android.util.Log
+import com.smartbluetoothsleeptracker.data.db.AppDatabase
+import com.smartbluetoothsleeptracker.data.db.DeviceEntity
+import com.smartbluetoothsleeptracker.data.db.DeviceType
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 
-data class ConnectedDevice(val name: String, val address: String, val startTime: Long)
+data class ConnectedDevice(
+    val address: String,
+    val name: String,
+    val isFavorite: Boolean = false,
+    val type: DeviceType = DeviceType.OTHER,
+    val device: BluetoothDevice? = null
+)
 
-// MAC-like name patterns produced by BLE random addresses — e.g. "22:BF:04" or "22iop1a3"
-private val MAC_PATTERN = Regex("^([0-9A-Fa-f]{2}[:\\-]){2,}[0-9A-Fa-f]{2}$")
-private val HEX_SHORT   = Regex("^[0-9A-Fa-f]{4,12}$")
+/**
+ * Monitors Bluetooth connection state changes, maintains connected device list,
+ * and auto-registers new devices in the Room database.
+ */
+class BluetoothMonitor(
+    private val context: Context,
+    private val db: AppDatabase
+) {
+    companion object {
+        private const val TAG = "BtMonitor"
+    }
 
-class BluetoothMonitor(private val context: Context) {
-
-    private val bluetoothAdapter: BluetoothAdapter? =
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val adapter: BluetoothAdapter? =
         context.getSystemService(BluetoothManager::class.java)?.adapter
 
-    private val _devices = MutableStateFlow<List<ConnectedDevice>>(emptyList())
-    val devices: StateFlow<List<ConnectedDevice>> = _devices.asStateFlow()
+    private val _connectedDevices = MutableStateFlow<List<ConnectedDevice>>(emptyList())
+    val connectedDevices: StateFlow<List<ConnectedDevice>> = _connectedDevices.asStateFlow()
 
-    private val _isEnabled = MutableStateFlow(bluetoothAdapter?.isEnabled == true)
-    val isEnabled: StateFlow<Boolean> = _isEnabled.asStateFlow()
+    private val _btEnabled = MutableStateFlow(adapter?.isEnabled ?: false)
+    val btEnabled: StateFlow<Boolean> = _btEnabled.asStateFlow()
 
-    fun onAdapterStateChanged(state: Int) {
-        _isEnabled.value = state == BluetoothAdapter.STATE_ON
-        if (state != BluetoothAdapter.STATE_ON) _devices.value = emptyList()
-    }
+    // Callback for external listeners (e.g. cooldown enforcer)
+    var onDeviceConnected: ((BluetoothDevice) -> Unit)? = null
+    var onDeviceDisconnected: ((BluetoothDevice) -> Unit)? = null
 
-    @SuppressLint("MissingPermission")
-    fun onDeviceConnected(device: BluetoothDevice) {
-        // Reject non-audio device classes
-        if (!isAudioDevice(device)) return
-        val name = device.safeName()
-        val address = device.address ?: return
-        // Reject ghost devices: BLE random addresses shown as hex names or MAC strings
-        if (isGhostName(name)) return
-        val current = _devices.value.toMutableList()
-        if (current.none { it.address == address }) {
-            current.add(ConnectedDevice(name = name, address = address, startTime = System.currentTimeMillis()))
-            _devices.value = current
-        }
-    }
-
-    fun onDeviceDisconnected(device: BluetoothDevice): ConnectedDevice? {
-        val address = device.address ?: return null
-        val current = _devices.value.toMutableList()
-        val removed = current.firstOrNull { it.address == address }
-        if (removed != null) {
-            current.removeAll { it.address == address }
-            _devices.value = current
-        }
-        return removed
-    }
-
-    @SuppressLint("MissingPermission")
-    fun reconcile() {
-        if (bluetoothAdapter?.isEnabled != true) {
-            _devices.value = emptyList()
-            _isEnabled.value = false
-            return
-        }
-        _isEnabled.value = true
-        // Verify every tracked device is still actually connected via audio profile
-        runCatching {
-            val current = _devices.value
-            if (current.isEmpty()) return
-            bluetoothAdapter?.getProfileProxy(context, object : BluetoothProfile.ServiceListener {
-                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    val connected = proxy.connectedDevices.map { it.address }.toSet()
-                    _devices.value = current.filter { it.address in connected }
-                    bluetoothAdapter?.closeProfileProxy(profile, proxy)
+    private val receiver = object : BroadcastReceiver() {
+        @SuppressLint("MissingPermission")
+        override fun onReceive(ctx: Context, intent: Intent) {
+            when (intent.action) {
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                    Log.i(TAG, "ACL connected: ${device.name ?: device.address}")
+                    scope.launch {
+                        registerDevice(device)
+                        refreshConnectedDevices()
+                    }
+                    onDeviceConnected?.invoke(device)
                 }
-                override fun onServiceDisconnected(profile: Int) {}
-            }, BluetoothProfile.A2DP)
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                    Log.i(TAG, "ACL disconnected: ${device.name ?: device.address}")
+                    scope.launch { refreshConnectedDevices() }
+                    onDeviceDisconnected?.invoke(device)
+                }
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                    _btEnabled.value = state == BluetoothAdapter.STATE_ON
+                    if (state == BluetoothAdapter.STATE_OFF) {
+                        _connectedDevices.value = emptyList()
+                    } else if (state == BluetoothAdapter.STATE_ON) {
+                        scope.launch { refreshConnectedDevices() }
+                    }
+                }
+            }
         }
     }
 
-    fun isAudioPlaying(): Boolean =
-        context.getSystemService(AudioManager::class.java)?.isMusicActive == true
+    fun start() {
+        val filter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+        }
+        context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        _btEnabled.value = adapter?.isEnabled ?: false
+        scope.launch { refreshConnectedDevices() }
+    }
 
-    fun hasConnectedDevice(): Boolean = _devices.value.isNotEmpty()
-    fun firstDevice(): ConnectedDevice? = _devices.value.firstOrNull()
-    fun deviceNames(): List<String> = _devices.value.map { it.name }
-
-    @SuppressLint("MissingPermission")
-    private fun BluetoothDevice.safeName(): String =
-        runCatching { name }.getOrNull()?.takeIf { it.isNotBlank() } ?: address ?: "Unknown"
-
-    /** Returns true for names that look like BLE random MAC addresses */
-    private fun isGhostName(name: String): Boolean {
-        if (name.length < 3) return true
-        if (MAC_PATTERN.matches(name)) return true          // "AB:CD:EF:01:23:45"
-        if (HEX_SHORT.matches(name)) return true            // "22bf04a1" — pure hex
-        if (name == "Unknown" || name.startsWith("00:")) return true
-        return false
+    fun stop() {
+        runCatching { context.unregisterReceiver(receiver) }
     }
 
     @SuppressLint("MissingPermission")
-    private fun isAudioDevice(device: BluetoothDevice): Boolean {
-        return runCatching {
-            val cls = device.bluetoothClass ?: return@runCatching false // reject null-class (BLE advertising)
-            val major = cls.majorDeviceClass
-            major == android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO ||
-            major == android.bluetooth.BluetoothClass.Device.Major.PERIPHERAL
-        }.getOrDefault(false) // safe default: reject unknown
+    suspend fun refreshConnectedDevices() {
+        val ad = adapter ?: return
+        if (!ad.isEnabled) { _connectedDevices.value = emptyList(); return }
+
+        val connected = mutableListOf<ConnectedDevice>()
+
+        runCatching {
+            ad.bondedDevices?.forEach { device ->
+                val isConn = try {
+                    device.javaClass.getMethod("isConnected").invoke(device) as? Boolean ?: false
+                } catch (_: Exception) { false }
+
+                if (isConn) {
+                    val dbDevice = db.deviceDao().getDevice(device.address)
+                    connected.add(
+                        ConnectedDevice(
+                            address = device.address,
+                            name = device.name ?: device.address,
+                            isFavorite = dbDevice?.isFavorite ?: false,
+                            type = dbDevice?.deviceType ?: inferDeviceType(device),
+                            device = device
+                        )
+                    )
+                }
+            }
+        }
+
+        _connectedDevices.value = connected
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun registerDevice(device: BluetoothDevice) {
+        val existing = db.deviceDao().getDevice(device.address)
+        if (existing == null) {
+            db.deviceDao().upsert(
+                DeviceEntity(
+                    address = device.address,
+                    name = device.name ?: device.address,
+                    deviceType = inferDeviceType(device),
+                    lastConnectedAt = System.currentTimeMillis()
+                )
+            )
+        } else {
+            db.deviceDao().updateLastConnected(device.address, System.currentTimeMillis())
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun inferDeviceType(device: BluetoothDevice): DeviceType {
+        val major = device.bluetoothClass?.majorDeviceClass ?: return DeviceType.OTHER
+        return when (major) {
+            BluetoothClass.Device.Major.AUDIO_VIDEO -> {
+                val name = (device.name ?: "").lowercase()
+                when {
+                    name.contains("buds") || name.contains("pod") || name.contains("ear") -> DeviceType.EARBUDS
+                    name.contains("neck") || name.contains("band") -> DeviceType.NECKBAND
+                    name.contains("speaker") || name.contains("soundbar") || name.contains("theatre") -> DeviceType.HOME_THEATRE
+                    else -> DeviceType.EARBUDS // Default audio devices to earbuds
+                }
+            }
+            BluetoothClass.Device.Major.COMPUTER -> DeviceType.PC
+            BluetoothClass.Device.Major.WEARABLE -> DeviceType.SMARTWATCH
+            else -> DeviceType.OTHER
+        }
     }
 }

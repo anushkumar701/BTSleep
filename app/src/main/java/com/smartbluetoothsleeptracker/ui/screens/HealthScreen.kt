@@ -1,24 +1,31 @@
 package com.smartbluetoothsleeptracker.ui.screens
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartbluetoothsleeptracker.ui.theme.*
+import com.smartbluetoothsleeptracker.viewmodel.HealthRisk
 import com.smartbluetoothsleeptracker.viewmodel.HealthViewModel
-import com.smartbluetoothsleeptracker.viewmodel.UsageStatus
 
 @Composable
 fun HealthScreen(
@@ -27,166 +34,195 @@ fun HealthScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
-    val statusColor by animateColorAsState(
-        targetValue = when (state.status) {
-            UsageStatus.SAFE    -> ConnectedGreen
-            UsageStatus.MODERATE -> Warning
-            UsageStatus.HIGH    -> ErrorRed
-        },
-        animationSpec = tween(600),
-        label = "status_color"
-    )
-
-    val statusLabel = when (state.status) {
-        UsageStatus.SAFE    -> "Safe"
-        UsageStatus.MODERATE -> "Moderate"
-        UsageStatus.HIGH    -> "High"
+    val riskColor = when (state.risk) {
+        HealthRisk.LOW -> StatusGreen
+        HealthRisk.MODERATE -> StatusOrange
+        HealthRisk.HIGH -> StatusRed
+    }
+    val riskLabel = when (state.risk) {
+        HealthRisk.LOW -> "Low Risk"
+        HealthRisk.MODERATE -> "Moderate"
+        HealthRisk.HIGH -> "High Risk"
+    }
+    val riskAdvice = when (state.risk) {
+        HealthRisk.LOW -> "Your listening duration is within safe limits."
+        HealthRisk.MODERATE -> "Consider taking regular breaks between listening sessions."
+        HealthRisk.HIGH -> "Prolonged listening can impact hearing. Reduce your session duration."
     }
 
-    val statusDescription = when (state.status) {
-        UsageStatus.SAFE    -> "Your listening time today is within safe limits."
-        UsageStatus.MODERATE -> "Consider reducing listening time to stay within safe limits."
-        UsageStatus.HIGH    -> "Extended use may impact hearing health over time."
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(DeepSpace)
-            .systemBarsPadding()
+    LazyColumn(
+        modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        contentPadding = PaddingValues(
+            top = WindowInsets.systemBars.asPaddingValues().calculateTopPadding() + 20.dp,
+            bottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 24.dp,
+            start = 24.dp, end = 24.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            // ── Usage Ring ───────────────────────────────────────────────────
-            Box(
-                modifier = Modifier.size(200.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                // Outer ring track
-                CircularProgressIndicator(
-                    progress = { 1f },
-                    modifier = Modifier.size(200.dp),
-                    strokeWidth = 12.dp,
-                    color = SpaceSurface2,
-                    trackColor = Color.Transparent,
-                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
-                )
-                // Filled ring — proportion of 120 min (upper moderate bound)
-                CircularProgressIndicator(
-                    progress = { (state.todayMinutes / 120f).coerceIn(0f, 1f) },
-                    modifier = Modifier.size(200.dp),
-                    strokeWidth = 12.dp,
-                    color = statusColor,
-                    trackColor = Color.Transparent,
-                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
-                )
-                // Center content
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "${state.todayMinutes}",
-                        style = MaterialTheme.typography.displayLarge.copy(
-                            fontSize = 52.sp
-                        ),
-                        fontWeight = FontWeight.Bold,
-                        color = statusColor,
-                        textAlign = TextAlign.Center
-                    )
-                    Text(
-                        text = "minutes",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = TextSecondary
-                    )
-                }
+        // Header
+        item {
+            Column {
+                Text("Ear Health", style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Black, color = TextPrimary)
+                Text("Earbuds & neckband usage analysis",
+                    style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
             }
+        }
 
-            Spacer(Modifier.height(24.dp))
-
-            // ── Status Badge ─────────────────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .background(statusColor.copy(0.12f), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 20.dp, vertical = 10.dp)
-            ) {
-                Text(
-                    text = statusLabel,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = statusColor,
-                    letterSpacing = 1.sp
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // ── Description ──────────────────────────────────────────────────
-            Text(
-                text = statusDescription,
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-                textAlign = TextAlign.Center,
-                lineHeight = 22.sp,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
-
-            Spacer(Modifier.height(32.dp))
-
-            // ── Quick guideline (always visible) ─────────────────────────────
+        // Risk gauge
+        item {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SpaceSurface, RoundedCornerShape(20.dp))
+                Modifier.fillMaxWidth()
+                    .background(Surface1, RoundedCornerShape(24.dp))
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Arc gauge
+                val fraction = (state.weekAvgMinutes / 180f).coerceIn(0f, 1f)
+                val animFrac by animateFloatAsState(fraction, tween(1000), label = "gauge")
+
+                Box(Modifier.size(180.dp), Alignment.Center) {
+                    Box(Modifier.fillMaxSize().drawWithCache {
+                        val stroke = Stroke(16f, cap = StrokeCap.Round)
+                        val inset = 16f
+                        val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
+                        val tl = Offset(inset, inset)
+                        onDrawBehind {
+                            drawArc(Surface3, 135f, 270f, false, tl, arcSize, style = stroke)
+                            drawArc(
+                                brush = Brush.sweepGradient(listOf(StatusGreen, StatusOrange, StatusRed)),
+                                startAngle = 135f,
+                                sweepAngle = 270f * animFrac,
+                                useCenter = false,
+                                topLeft = tl, size = arcSize, style = stroke
+                            )
+                        }
+                    })
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${state.weekAvgMinutes}", style = MaterialTheme.typography.displayMedium,
+                            fontWeight = FontWeight.Black, color = TextPrimary)
+                        Text("min/day avg", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // Risk badge
+                Box(
+                    Modifier.background(riskColor.copy(0.12f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(riskLabel, style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold, color = riskColor)
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(riskAdvice, style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary, textAlign = TextAlign.Center)
+            }
+        }
+
+        // Today's usage
+        item {
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(Surface1, RoundedCornerShape(18.dp))
+                    .padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(48.dp).background(AccentBlue.copy(0.1f), CircleShape), Alignment.Center) {
+                    Icon(Icons.Rounded.Today, null, tint = AccentBlue, modifier = Modifier.size(24.dp))
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Today", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("Earbuds & neckband listening time", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                }
+                Text(
+                    "${state.todayMinutes}m",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    color = when {
+                        state.todayMinutes > 120 -> StatusRed
+                        state.todayMinutes > 60 -> StatusOrange
+                        else -> StatusGreen
+                    }
+                )
+            }
+        }
+
+        // Weekly trend chart
+        item {
+            Column(
+                Modifier.fillMaxWidth()
+                    .background(Surface1, RoundedCornerShape(20.dp))
                     .padding(20.dp)
             ) {
-                Text(
-                    "Guidelines",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = TextTertiary,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Text("Weekly Trend", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, color = TextPrimary)
+                Spacer(Modifier.height(16.dp))
+
+                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.Bottom) {
+                    state.weeklyData.forEach { (label, mins) ->
+                        val maxMins = state.weeklyData.maxOf { it.second }.coerceAtLeast(60)
+                        val frac = (mins / maxMins.toFloat()).coerceIn(0.04f, 1f)
+                        val color = when { mins > 120 -> StatusRed; mins > 60 -> StatusOrange; else -> AccentBlue }
+                        val animFrac by animateFloatAsState(frac, tween(800), label = "w")
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                if (mins > 0) "${mins}m" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = color, fontWeight = FontWeight.Bold, fontSize = 9.sp
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Box(
+                                Modifier.width(28.dp).height((80 * animFrac).dp)
+                                    .background(Brush.verticalGradient(listOf(color, color.copy(0.4f))), RoundedCornerShape(6.dp))
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(label, style = MaterialTheme.typography.labelSmall,
+                                color = if (label == "Today") AccentBlue else TextTertiary, fontSize = 9.sp)
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(12.dp))
-                GuidelineRow(ConnectedGreen, "≤ 60 min", "Safe — sustainable daily use")
-                Spacer(Modifier.height(8.dp))
-                GuidelineRow(Warning, "60–120 min", "Moderate — reduce when possible")
-                Spacer(Modifier.height(8.dp))
-                GuidelineRow(ErrorRed, "> 120 min", "High — take extended breaks")
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "⚠ This is informational only. SleepBT cannot measure actual sound volume.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextTertiary,
-                    lineHeight = 16.sp
-                )
+                // Legend
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    LegendDot(StatusGreen, "< 1h (Safe)")
+                    LegendDot(StatusOrange, "1-2h")
+                    LegendDot(StatusRed, "> 2h")
+                }
+            }
+        }
+
+        // Disclaimer
+        item {
+            Surface(
+                color = StatusOrange.copy(0.06f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
+                    Icon(Icons.Rounded.Info, null, tint = StatusOrange, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "Estimate based on listening duration only. Volume level is not measured; this is not medical advice.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        lineHeight = 16.sp
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun GuidelineRow(color: Color, range: String, desc: String) {
+private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .background(color, CircleShape)
-        )
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(
-                range,
-                style = MaterialTheme.typography.labelMedium,
-                color = TextPrimary,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                desc,
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
-            )
-        }
+        Box(Modifier.size(8.dp).background(color, CircleShape))
+        Spacer(Modifier.width(4.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
     }
 }

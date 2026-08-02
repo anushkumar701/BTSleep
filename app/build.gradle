@@ -12,14 +12,19 @@ android {
 
     defaultConfig {
         applicationId "com.smartbluetoothsleeptracker"
-        minSdk 26
-        targetSdk 32
-        versionCode 4
-        versionName "2.1.1"
+        minSdk 33
+        targetSdk 35
+        versionCode 10
+        versionName "3.0.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary true
+        }
+
+        // Room schema export
+        ksp {
+            arg("room.schemaLocation", "$projectDir/schemas")
         }
     }
 
@@ -49,6 +54,7 @@ android {
 
     buildFeatures {
         compose true
+        buildConfig true
     }
 
     composeOptions {
@@ -84,11 +90,18 @@ dependencies {
     implementation 'androidx.room:room-ktx:2.6.1'
     ksp 'androidx.room:room-compiler:2.6.1'
 
-    // DataStore (replaces SharedPreferences)
+    // DataStore
     implementation 'androidx.datastore:datastore-preferences:1.1.1'
+
+    // WorkManager (daily aggregate rollups)
+    implementation 'androidx.work:work-runtime-ktx:2.9.1'
 
     // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+
+    // Shizuku (optional privileged disconnect)
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
 
     // Debug
     debugImplementation 'androidx.compose.ui:ui-tooling'

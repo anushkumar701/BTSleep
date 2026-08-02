@@ -1,45 +1,68 @@
 package com.smartbluetoothsleeptracker.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.smartbluetoothsleeptracker.data.db.AppDatabase
-import com.smartbluetoothsleeptracker.data.db.SessionEntity
+import com.smartbluetoothsleeptracker.BTCurfewApp
+import com.smartbluetoothsleeptracker.data.db.DailyUsageEntity
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-/** Status labels per spec: Safe / Moderate / High */
-enum class UsageStatus { SAFE, MODERATE, HIGH }
+enum class HealthRisk { LOW, MODERATE, HIGH }
 
 data class HealthUiState(
     val todayMinutes: Int = 0,
-    val status: UsageStatus = UsageStatus.SAFE
+    val weekAvgMinutes: Int = 0,
+    val risk: HealthRisk = HealthRisk.LOW,
+    val weeklyData: List<Pair<String, Int>> = emptyList() // dayLabel to minutes
 )
 
-class HealthViewModel(private val db: AppDatabase) : ViewModel() {
+class HealthViewModel(application: Application) : AndroidViewModel(application) {
 
-    val state: StateFlow<HealthUiState> = db.sessionDao().getAllSessions()
-        .map { sessions -> computeHealth(sessions) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, HealthUiState())
+    private val app = application as BTCurfewApp
+    private val _state = MutableStateFlow(HealthUiState())
+    val state: StateFlow<HealthUiState> = _state.asStateFlow()
 
-    private fun computeHealth(sessions: List<SessionEntity>): HealthUiState {
-        val today = LocalDate.now()
-        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+    init { refresh() }
 
-        val todayMinutes = sessions
-            .filter { it.date == todayStr }
-            .sumOf { it.duration / 60_000L }
-            .toInt()
+    fun refresh() {
+        viewModelScope.launch {
+            val today = LocalDate.now()
+            val fmt = DateTimeFormatter.ISO_LOCAL_DATE
+            val weekAgo = today.minusDays(6)
 
-        val status = when {
-            todayMinutes <= 60 -> UsageStatus.SAFE
-            todayMinutes <= 120 -> UsageStatus.MODERATE
-            else -> UsageStatus.HIGH
+            val usage = app.db.dailyUsageDao().earHealthUsageInRange(
+                weekAgo.format(fmt), today.format(fmt)
+            )
+
+            // Build 7-day chart
+            val weeklyData = (0..6).map { offset ->
+                val d = weekAgo.plusDays(offset.toLong())
+                val dateStr = d.format(fmt)
+                val dayMins = usage.filter { it.date == dateStr }.sumOf { it.totalMinutes }
+                val label = if (d == today) "Today"
+                else d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
+                label to dayMins
+            }
+
+            val todayMins = weeklyData.last().second
+            val weekTotal = weeklyData.sumOf { it.second }
+            val weekAvg = if (weeklyData.isNotEmpty()) weekTotal / weeklyData.size else 0
+
+            val risk = when {
+                weekAvg >= 120 -> HealthRisk.HIGH
+                weekAvg >= 60 -> HealthRisk.MODERATE
+                else -> HealthRisk.LOW
+            }
+
+            _state.value = HealthUiState(
+                todayMinutes = todayMins,
+                weekAvgMinutes = weekAvg,
+                risk = risk,
+                weeklyData = weeklyData
+            )
         }
-
-        return HealthUiState(
-            todayMinutes = todayMinutes,
-            status = status
-        )
     }
 }

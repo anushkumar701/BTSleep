@@ -1,15 +1,16 @@
 package com.smartbluetoothsleeptracker.ui.navigation
 
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.navigation.*
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -19,130 +20,83 @@ import androidx.navigation.compose.rememberNavController
 import com.smartbluetoothsleeptracker.ui.screens.*
 import com.smartbluetoothsleeptracker.ui.theme.*
 import com.smartbluetoothsleeptracker.viewmodel.*
-import java.net.URLDecoder
-import java.net.URLEncoder
 
-sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
-    object Home     : Screen("home",     "Sleep",   Icons.Rounded.Bedtime)
-    object History  : Screen("history",  "History", Icons.Rounded.BarChart)
-    object Health   : Screen("health",   "Health",  Icons.Rounded.HealthAndSafety)
-    object Settings : Screen("settings", "Settings",Icons.Rounded.Settings)
+sealed class Tab(val route: String, val label: String, val icon: ImageVector) {
+    data object Home : Tab("home", "Home", Icons.Rounded.NightsStay)
+    data object Usage : Tab("usage", "Usage", Icons.Rounded.BarChart)
+    data object Health : Tab("health", "Health", Icons.Rounded.Favorite)
+    data object Settings : Tab("settings", "Settings", Icons.Rounded.Settings)
 }
 
-val SCREENS = listOf(Screen.Home, Screen.History, Screen.Health, Screen.Settings)
+val tabs = listOf(Tab.Home, Tab.Usage, Tab.Health, Tab.Settings)
 
 @Composable
 fun AppNavigation(
-    homeVm: HomeViewModel,
-    historyVm: HistoryViewModel,
-    settingsVm: SettingsViewModel,
-    healthVm: HealthViewModel,
-    onStartTimer: (Long) -> Unit,
-    onCancelTimer: () -> Unit,
-    onExtendTimer: () -> Unit,
-    onDisconnectNow: () -> Unit,
-    onCancelBlocker: () -> Unit
+    homeViewModel: HomeViewModel,
+    modifier: Modifier = Modifier
 ) {
     val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
 
     Scaffold(
-        containerColor = DeepSpace,
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            val navBackStack by navController.currentBackStackEntryAsState()
-            val currentRoute = navBackStack?.destination?.route
-            val isDetailPage = currentRoute?.startsWith("device_detail/") == true
-
-            if (!isDetailPage) {
-                NavigationBar(
-                    containerColor = SpaceSurface,
-                    tonalElevation = 0.dp
-                ) {
-                    val currentDest = navBackStack?.destination
-                    SCREENS.forEach { screen ->
-                        val selected = currentDest?.hierarchy?.any { it.route == screen.route } == true
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = {
-                                navController.navigate(screen.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = {
-                                Icon(
-                                    screen.icon,
-                                    screen.label,
-                                    tint = if (selected) AccentBlue else TextTertiary
-                                )
-                            },
-                            label = {
-                                Text(
-                                    screen.label,
-                                    color = if (selected) AccentBlue else TextTertiary,
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = AccentBlue,
-                                indicatorColor = AccentBlue.copy(alpha = 0.16f)
-                            )
+            NavigationBar(
+                containerColor = Surface1,
+                contentColor = TextPrimary,
+                tonalElevation = 0.dp
+            ) {
+                tabs.forEach { tab ->
+                    val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
+                    NavigationBarItem(
+                        selected = selected,
+                        onClick = {
+                            navController.navigate(tab.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        icon = {
+                            Icon(tab.icon, tab.label, modifier = Modifier.size(24.dp))
+                        },
+                        label = {
+                            Text(tab.label, style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = AccentBlue,
+                            selectedTextColor = AccentBlue,
+                            unselectedIconColor = TextTertiary,
+                            unselectedTextColor = TextTertiary,
+                            indicatorColor = AccentBlue.copy(alpha = 0.1f)
                         )
-                    }
+                    )
                 }
             }
         }
-    ) { padding ->
+    ) { innerPadding ->
         NavHost(
-            navController,
-            startDestination = Screen.Home.route,
-            modifier = Modifier.padding(padding)
+            navController = navController,
+            startDestination = Tab.Home.route,
+            modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Home.route) {
-                HomeScreen(
-                    homeVm = homeVm,
-                    onStartTimer = onStartTimer,
-                    onCancelTimer = onCancelTimer,
-                    onExtendTimer = onExtendTimer,
-                    onDisconnectNow = onDisconnectNow,
-                    onCancelBlocker = onCancelBlocker
-                )
+            composable(Tab.Home.route) {
+                HomeScreen(viewModel = homeViewModel)
             }
-            composable(Screen.History.route) {
-                HistoryScreen(
-                    viewModel = historyVm,
-                    onDeviceClick = { deviceName ->
-                        val encoded = URLEncoder.encode(deviceName, "UTF-8")
-                        navController.navigate("device_detail/$encoded")
-                    }
-                )
+            composable(Tab.Usage.route) {
+                val usageVm: UsageViewModel = viewModel()
+                UsageScreen(viewModel = usageVm)
             }
-            composable(Screen.Health.route) {
+            composable(Tab.Health.route) {
+                val healthVm: HealthViewModel = viewModel()
                 HealthScreen(viewModel = healthVm)
             }
-            composable(Screen.Settings.route) {
+            composable(Tab.Settings.route) {
+                val settingsVm: SettingsViewModel = viewModel()
                 SettingsScreen(viewModel = settingsVm)
-            }
-
-            composable(
-                route = "device_detail/{deviceName}",
-                arguments = listOf(navArgument("deviceName") { type = NavType.StringType })
-            ) { backStack ->
-                val encodedName = backStack.arguments?.getString("deviceName") ?: return@composable
-                val deviceName = URLDecoder.decode(encodedName, "UTF-8")
-                val state by historyVm.state.collectAsState()
-                val stat = state.deviceStats.find { it.deviceName == deviceName }
-
-                if (stat != null) {
-                    DeviceDetailScreen(
-                        stat = stat,
-                        onResetTiming = { historyVm.resetDeviceTiming(it) },
-                        onRemoveDevice = { historyVm.deleteDeviceHistory(it) },
-                        onBack = { navController.popBackStack() }
-                    )
-                } else {
-                    navController.popBackStack()
-                }
             }
         }
     }
