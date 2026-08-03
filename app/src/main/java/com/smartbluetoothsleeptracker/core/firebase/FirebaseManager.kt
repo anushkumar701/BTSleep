@@ -37,14 +37,14 @@ object FirebaseManager {
                     .addOnSuccessListener { authResult ->
                         val uid = authResult.user?.uid ?: return@addOnSuccessListener
                         Log.i(TAG, "Anonymous sign-in successful: $uid")
-                        recordDeviceActivity(uid)
+                        recordDeviceActivity(context, uid)
                     }
                     .addOnFailureListener { e ->
                         Log.e(TAG, "Anonymous sign-in failed: ${e.message}")
                     }
             } else {
                 Log.d(TAG, "Device already authenticated anonymously: ${currentUser.uid}")
-                recordDeviceActivity(currentUser.uid)
+                recordDeviceActivity(context, currentUser.uid)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing Firebase tracking: ${e.message}")
@@ -80,6 +80,10 @@ object FirebaseManager {
                 val tokenData = mapOf(
                     "token" to token,
                     "status" to "active",
+                    "deviceName" to getFormattedDeviceName(),
+                    "manufacturer" to android.os.Build.MANUFACTURER,
+                    "model" to android.os.Build.MODEL,
+                    "androidVersion" to android.os.Build.VERSION.RELEASE,
                     "lastSeenAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -90,17 +94,47 @@ object FirebaseManager {
         }
     }
 
+    private fun getFormattedDeviceName(): String {
+        val manufacturer = android.os.Build.MANUFACTURER.replaceFirstChar { 
+            if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() 
+        }
+        val model = android.os.Build.MODEL
+        return if (model.lowercase().startsWith(manufacturer.lowercase())) {
+            model.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
+        } else {
+            "$manufacturer $model"
+        }
+    }
+
     /**
      * Creates or updates the device document in Firestore collection 'devices'.
      * Sets installedAt on first creation and updates lastActiveAt on every launch.
      */
-    private fun recordDeviceActivity(uid: String) {
+    private fun recordDeviceActivity(context: Context, uid: String) {
         try {
+            val formattedName = getFormattedDeviceName()
+            val manufacturer = android.os.Build.MANUFACTURER
+            val model = android.os.Build.MODEL
+            val osVersion = "Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})"
+
+            // Log properties in Firebase Analytics for easy filtering
+            val analytics = FirebaseAnalytics.getInstance(context)
+            analytics.setUserProperty("device_name", formattedName)
+            analytics.setUserProperty("device_model", model)
+            analytics.setUserProperty("android_version", osVersion)
+
             val db = FirebaseFirestore.getInstance()
             val docRef = db.collection(COLLECTION_DEVICES).document(uid)
 
             docRef.get().addOnSuccessListener { snapshot ->
                 val data = mutableMapOf<String, Any>(
+                    "uid" to uid,
+                    "deviceName" to formattedName,
+                    "manufacturer" to manufacturer,
+                    "model" to model,
+                    "androidVersion" to android.os.Build.VERSION.RELEASE,
+                    "sdkVersion" to android.os.Build.VERSION.SDK_INT,
+                    "osVersion" to osVersion,
                     "lastActiveAt" to FieldValue.serverTimestamp()
                 )
                 if (!snapshot.exists()) {
@@ -108,7 +142,7 @@ object FirebaseManager {
                 }
                 docRef.set(data, SetOptions.merge())
                     .addOnSuccessListener {
-                        Log.i(TAG, "Firestore device document updated for $uid")
+                        Log.i(TAG, "Firestore device document updated for $formattedName ($uid)")
                     }
                     .addOnFailureListener { e ->
                         Log.e(TAG, "Failed updating Firestore device doc: ${e.message}")
