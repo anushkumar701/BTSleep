@@ -25,6 +25,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
@@ -120,8 +126,12 @@ fun SettingsScreen(
         }
         if (s.playbackStopEnabled) {
             item {
+                val focusManager = LocalFocusManager.current
                 val currentMin = maxOf(1, s.fadeOutDurationSeconds / 60)
-                var textInput by remember(currentMin) { mutableStateOf(currentMin.toString()) }
+                var tfValue by remember(currentMin) {
+                    val str = currentMin.toString()
+                    mutableStateOf(TextFieldValue(text = str, selection = TextRange(str.length)))
+                }
 
                 Column(
                     Modifier
@@ -140,22 +150,40 @@ fun SettingsScreen(
                             Text("Ramp down volume before disconnect (1–30 min)", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                         }
                         OutlinedTextField(
-                            value = textInput,
+                            value = tfValue,
                             onValueChange = { input ->
-                                textInput = input.filter { it.isDigit() }.take(2)
-                                val numMin = textInput.toIntOrNull()
+                                val filtered = input.text.filter { it.isDigit() }.take(2)
+                                tfValue = input.copy(
+                                    text = filtered,
+                                    selection = TextRange(filtered.length)
+                                )
+                                val numMin = filtered.toIntOrNull()
                                 if (numMin != null) {
                                     viewModel.setFadeOutDuration(numMin.coerceIn(1, 30) * 60)
                                 }
                             },
-                            modifier = Modifier.width(68.dp),
+                            modifier = Modifier
+                                .width(68.dp)
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) {
+                                        tfValue = tfValue.copy(selection = TextRange(tfValue.text.length))
+                                    }
+                                },
                             textStyle = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center,
                                 color = TextPrimary
                             ),
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    focusManager.clearFocus()
+                                }
+                            ),
                             shape = RoundedCornerShape(10.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = AccentBlue,
