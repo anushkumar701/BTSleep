@@ -17,11 +17,16 @@ import com.smartbluetoothsleeptracker.ui.theme.SleepBTTheme
 import com.smartbluetoothsleeptracker.viewmodel.HomeViewModel
 import kotlinx.coroutines.launch
 
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        com.smartbluetoothsleeptracker.core.firebase.FirebaseManager.initAndTrackDevice(this)
 
         val app = application as SleepBTApp
         val homeVm = ViewModelProvider(this)[HomeViewModel::class.java]

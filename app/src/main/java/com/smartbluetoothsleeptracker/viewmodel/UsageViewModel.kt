@@ -5,9 +5,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.smartbluetoothsleeptracker.SleepBTApp
 import com.smartbluetoothsleeptracker.data.db.*
+import com.smartbluetoothsleeptracker.receiver.BluetoothReceiver
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 enum class UsagePeriod { TODAY, WEEK, MONTH }
@@ -18,14 +23,31 @@ data class DeviceUsageStat(
     val sessionCount: Int
 )
 
+data class ChartBarItem(
+    val label: String,
+    val minutes: Int,
+    val isHighlighted: Boolean = false
+)
+
+data class UndoActionState(
+    val message: String? = null,
+    val pendingDeviceAddress: String? = null,
+    val actionType: PendingActionType? = null
+)
+
+enum class PendingActionType { REMOVE_DEVICE, RESET_USAGE }
+
 data class UsageUiState(
     val period: UsagePeriod = UsagePeriod.WEEK,
     val sessions: List<SessionEntity> = emptyList(),
     val deviceStats: List<DeviceUsageStat> = emptyList(),
-    val dailyUsage: List<DailyUsageEntity> = emptyList(),
+    val chartItems: List<ChartBarItem> = emptyList(),
+    val chartTitle: String = "Last 7 Days",
     val totalMinutes: Int = 0,
     val totalSessions: Int = 0,
-    val totalDevices: Int = 0
+    val totalDevices: Int = 0,
+    val isRefreshing: Boolean = false,
+    val undoState: UndoActionState = UndoActionState()
 )
 
 class UsageViewModel(application: Application) : AndroidViewModel(application) {
@@ -35,6 +57,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<UsageUiState> = _state.asStateFlow()
 
     private val _period = MutableStateFlow(UsagePeriod.WEEK)
+    private var pendingJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -57,29 +80,92 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val fromStr = from.format(fmt)
         val toStr = to.format(fmt)
 
-        val sessions = app.db.sessionDao().sessionsInRangeNow(fromStr, toStr)
-        val usage = app.db.dailyUsageDao().usageInRangeNow(fromStr, toStr)
+        val sessions = app.db.sessionDao().sessionsInRangeNow(fromStr, toStr).toMutableList()
+        val usage = app.db.dailyUsageDao().usageInRangeNow(fromStr, toStr).toMutableList()
+
+        // Check active ongoing connections to include live duration
+        val connectedDevices = app.btMonitor.connectedDevices.value
+        val activeAddrs = connectedDevices.map { it.address }
+        val now = System.currentTimeMillis()
+
+        var extraLiveMinutes = 0
+        activeAddrs.forEach { addr ->
+            val startTime = BluetoothReceiver.getActiveConnectTime(app, addr)
+            if (startTime > 0L && now > startTime) {
+                val liveMin = ((now - startTime) / 60_000L).toInt()
+                if (liveMin > 0) {
+                    extraLiveMinutes += liveMin
+                }
+            }
+        }
 
         // Aggregate by device
-        val deviceAddrs = (sessions.map { it.deviceAddress } + usage.map { it.deviceAddress }).distinct()
+        val deviceAddrs = (sessions.map { it.deviceAddress } + usage.map { it.deviceAddress } + activeAddrs).distinct()
         val stats = deviceAddrs.mapNotNull { addr ->
             val dev = app.db.deviceDao().getDevice(addr) ?: return@mapNotNull null
-            val mins = usage.filter { it.deviceAddress == addr }.sumOf { it.totalMinutes }
-            val count = sessions.count { it.deviceAddress == addr }
+            var mins = usage.filter { it.deviceAddress == addr }.sumOf { it.totalMinutes }
+            var count = sessions.count { it.deviceAddress == addr }
+
+            val activeStart = BluetoothReceiver.getActiveConnectTime(app, addr)
+            if (activeStart > 0L && now > activeStart) {
+                val liveMins = ((now - activeStart) / 60_000L).toInt()
+                mins += liveMins
+            }
+
             DeviceUsageStat(dev, mins, count)
         }.sortedByDescending { it.totalMinutes }
 
-        // 7-day chart data (always trailing 7 days)
-        val chartFrom = today.minusDays(6).format(fmt)
-        val chartUsage = app.db.dailyUsageDao().usageInRangeNow(chartFrom, toStr)
+        // Aggregate chart bars
+        val chartBars = when (period) {
+            UsagePeriod.TODAY -> {
+                val currentHour = LocalDateTime.now().hour
+                (0..currentHour step 4).map { h ->
+                    val label = String.format("%02d:00", h)
+                    val hourMins = sessions.filter {
+                        val sTime = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(it.startTime), ZoneId.systemDefault())
+                        sTime.toLocalDate() == today && sTime.hour in h until (h + 4)
+                    }.sumOf { it.actualDurationMin ?: 0 }
+                    ChartBarItem(label, hourMins, h == (currentHour / 4) * 4)
+                }
+            }
+            UsagePeriod.WEEK -> {
+                (0..6).map { offset ->
+                    val d = from.plusDays(offset.toLong())
+                    val dStr = d.format(fmt)
+                    val label = if (d == today) "Today" else d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
+                    val mins = usage.filter { it.date == dStr }.sumOf { it.totalMinutes }
+                    ChartBarItem(label, mins, d == today)
+                }
+            }
+            UsagePeriod.MONTH -> {
+                (0..3).map { w ->
+                    val wStart = from.plusDays((w * 7).toLong())
+                    val wEnd = wStart.plusDays(6)
+                    val label = "W${w + 1}"
+                    val mins = usage.filter {
+                        val d = LocalDate.parse(it.date, fmt)
+                        !d.isBefore(wStart) && !d.isAfter(wEnd)
+                    }.sumOf { it.totalMinutes }
+                    ChartBarItem(label, mins, today in wStart..wEnd)
+                }
+            }
+        }
+
+        val totalMins = stats.sumOf { it.totalMinutes } + extraLiveMinutes
+        val totalSess = sessions.size
 
         _state.value = UsageUiState(
             period = period,
             sessions = sessions,
             deviceStats = stats,
-            dailyUsage = chartUsage,
-            totalMinutes = usage.sumOf { it.totalMinutes },
-            totalSessions = sessions.size,
+            chartItems = chartBars,
+            chartTitle = when (period) {
+                UsagePeriod.TODAY -> "Today's Hourly Usage"
+                UsagePeriod.WEEK -> "Last 7 Days"
+                UsagePeriod.MONTH -> "Last 30 Days (Weekly)"
+            },
+            totalMinutes = totalMins,
+            totalSessions = totalSess,
             totalDevices = stats.size
         )
     }
@@ -99,19 +185,63 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun resetUsageForDevice(address: String) {
-        viewModelScope.launch {
-            app.db.dailyUsageDao().deleteForDevice(address)
-            app.db.sessionDao().deleteForDevice(address)
-            loadData(_period.value)
+    // ── UNDO SNACKBAR FOR DESTRUCTIVE ACTIONS ─────────────────────────────
+
+    fun scheduleResetUsage(address: String) {
+        pendingJob?.cancel()
+        _state.update {
+            it.copy(
+                undoState = UndoActionState(
+                    message = "Usage reset for device",
+                    pendingDeviceAddress = address,
+                    actionType = PendingActionType.RESET_USAGE
+                )
+            )
+        }
+        pendingJob = viewModelScope.launch {
+            delay(5000L) // 5 second undo window
+            commitPendingAction()
         }
     }
 
-    fun removeDevice(address: String) {
-        viewModelScope.launch {
-            app.db.deviceDao().deleteByAddress(address)
-            loadData(_period.value)
+    fun scheduleRemoveDevice(address: String) {
+        pendingJob?.cancel()
+        _state.update {
+            it.copy(
+                undoState = UndoActionState(
+                    message = "Device removed",
+                    pendingDeviceAddress = address,
+                    actionType = PendingActionType.REMOVE_DEVICE
+                )
+            )
         }
+        pendingJob = viewModelScope.launch {
+            delay(5000L) // 5 second undo window
+            commitPendingAction()
+        }
+    }
+
+    fun undoPendingAction() {
+        pendingJob?.cancel()
+        pendingJob = null
+        _state.update { it.copy(undoState = UndoActionState()) }
+    }
+
+    private suspend fun commitPendingAction() {
+        val undo = _state.value.undoState
+        val addr = undo.pendingDeviceAddress ?: return
+        when (undo.actionType) {
+            PendingActionType.RESET_USAGE -> {
+                app.db.dailyUsageDao().deleteForDevice(addr)
+                app.db.sessionDao().deleteForDevice(addr)
+            }
+            PendingActionType.REMOVE_DEVICE -> {
+                app.db.deviceDao().deleteByAddress(addr)
+            }
+            null -> {}
+        }
+        _state.update { it.copy(undoState = UndoActionState()) }
+        loadData(_period.value)
     }
 
     fun deleteSession(id: Long) {
@@ -130,6 +260,11 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
-        viewModelScope.launch { loadData(_period.value) }
+        viewModelScope.launch {
+            _state.update { it.copy(isRefreshing = true) }
+            loadData(_period.value)
+            delay(300)
+            _state.update { it.copy(isRefreshing = false) }
+        }
     }
 }

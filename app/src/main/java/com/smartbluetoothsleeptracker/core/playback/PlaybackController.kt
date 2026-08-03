@@ -1,25 +1,20 @@
 package com.smartbluetoothsleeptracker.core.playback
 
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.media.session.MediaController
-import android.media.session.MediaSessionManager
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import kotlinx.coroutines.*
 
 /**
  * Result of a playback fade operation.
- * - COMPLETED: fade finished uninterrupted → proceed with disconnect
- * - CANCELLED_BY_USER: volume key pressed during fade → skip disconnect, extend timer
+ * - COMPLETED: fade finished uninterrupted -> proceed with disconnect
+ * - CANCELLED_BY_USER: volume key pressed during fade -> skip disconnect, extend timer
  * - DISABLED: playback stop not enabled in settings
  */
 enum class FadeResult { COMPLETED, CANCELLED_BY_USER, DISABLED }
@@ -39,9 +34,7 @@ class PlaybackController(private val context: Context) {
     }
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private val handler = Handler(Looper.getMainLooper())
 
-    @Volatile private var fadeJob: Job? = null
     @Volatile private var priorVolume: Int = -1
     @Volatile private var userCancelled = false
     private var volumeReceiver: BroadcastReceiver? = null
@@ -54,28 +47,31 @@ class PlaybackController(private val context: Context) {
     suspend fun fadeOutAndStop(durationSeconds: Int): FadeResult = withContext(Dispatchers.Main) {
         userCancelled = false
         priorVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        Log.i(TAG, "Starting fadeOutAndStop: duration=${durationSeconds}s, initial STREAM_MUSIC volume=$priorVolume")
 
         if (priorVolume == 0) {
-            // Already muted — just steal focus and pause
+            Log.i(TAG, "Initial volume is 0, skipping fade. Stealing audio focus and pausing.")
             stealAudioFocusAndPause()
             return@withContext FadeResult.COMPLETED
         }
 
-        // Register volume key listener
+        // 1. Register volume key listener BEFORE first volume adjustment
         registerVolumeReceiver()
 
         try {
-            val totalSteps = (durationSeconds * 1000L / FADE_TICK_MS).toInt()
+            val totalSteps = (durationSeconds * 1000L / FADE_TICK_MS).toInt().coerceAtLeast(1)
             val volumeDecrement = priorVolume.toFloat() / totalSteps.toFloat()
             var currentStep = 0
             var lastSetVol = priorVolume
 
+            Log.d(TAG, "Fade parameters: totalSteps=$totalSteps, decrementPerStep=$volumeDecrement")
+
             while (currentStep < totalSteps) {
                 if (userCancelled) {
-                    Log.i(TAG, "Fade cancelled by user — restoring volume to $priorVolume")
+                    Log.i(TAG, "Fade cancelled by user volume key press! Restoring volume to exact initial level: $priorVolume")
                     audioManager.setStreamVolume(
                         AudioManager.STREAM_MUSIC, priorVolume,
-                        0 // no flags = silent
+                        0 // silent
                     )
                     return@withContext FadeResult.CANCELLED_BY_USER
                 }
@@ -87,11 +83,18 @@ class PlaybackController(private val context: Context) {
                         internalVolumeChanges.add(Pair(newVol, System.currentTimeMillis()))
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
                         lastSetVol = newVol
+                        Log.d(TAG, "Fade step $currentStep/$totalSteps: set volume to $newVol")
                     } catch (e: Exception) {
                         Log.w(TAG, "setStreamVolume failed: ${e.message}")
                     }
                 }
                 delay(FADE_TICK_MS)
+            }
+
+            if (userCancelled) {
+                Log.i(TAG, "Fade cancelled at end of loop by user. Restoring volume to $priorVolume")
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, priorVolume, 0)
+                return@withContext FadeResult.CANCELLED_BY_USER
             }
 
             // Ensure volume is 0
@@ -100,34 +103,37 @@ class PlaybackController(private val context: Context) {
                     internalVolumeChanges.add(Pair(0, System.currentTimeMillis()))
                     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
                 } catch (e: Exception) {
-                    Log.w(TAG, "setStreamVolume failed: ${e.message}")
+                    Log.w(TAG, "setStreamVolume failed at finish: ${e.message}")
                 }
             }
-            Log.i(TAG, "Fade completed — volume at 0")
+            Log.i(TAG, "Fade completed naturally — STREAM_MUSIC volume reached 0")
 
             // Steal focus and pause media sessions
             stealAudioFocusAndPause()
 
-            // Restore volume after a short delay so next playback isn't muted
-            handler.postDelayed({
-                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, priorVolume, 0)
-                Log.d(TAG, "Volume restored to $priorVolume")
-            }, 3000)
+            // Restore volume after a short delay so user's next session isn't muted
+            val savedPriorVol = priorVolume
+            CoroutineScope(Dispatchers.Main).launch {
+                delay(3000)
+                try {
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, savedPriorVol, 0)
+                    Log.i(TAG, "Post-fade: restored STREAM_MUSIC volume to $savedPriorVol after 3s delay")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Post-fade volume restore failed: ${e.message}")
+                }
+            }
 
             return@withContext FadeResult.COMPLETED
 
         } finally {
+            // Unregister receiver immediately when fade completes or is cancelled
             unregisterVolumeReceiver()
             internalVolumeChanges.clear()
+            Log.d(TAG, "Unregistered volume receiver and cleared internal change history")
         }
     }
 
-    /**
-     * Steals audio focus (most apps pause on focus loss) and directly pauses
-     * all active media sessions if Notification Listener permission is granted.
-     */
     private fun stealAudioFocusAndPause() {
-        // 1. Audio focus steal
         try {
             val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                 .setAudioAttributes(
@@ -139,17 +145,17 @@ class PlaybackController(private val context: Context) {
                 .setOnAudioFocusChangeListener { /* no-op */ }
                 .build()
             audioManager.requestAudioFocus(focusRequest)
-            Log.d(TAG, "Audio focus stolen")
+            Log.d(TAG, "Audio focus stolen successfully")
         } catch (e: Exception) {
             Log.w(TAG, "AudioFocus request failed: ${e.message}")
         }
 
-        // 2. Send media key PAUSE + STOP
         try {
             audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE))
             audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE))
             audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_STOP))
             audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_STOP))
+            Log.d(TAG, "Dispatched MEDIA_PAUSE and MEDIA_STOP key events")
         } catch (e: Exception) {
             Log.w(TAG, "Media key dispatch failed: ${e.message}")
         }
@@ -160,7 +166,6 @@ class PlaybackController(private val context: Context) {
     private fun registerVolumeReceiver() {
         volumeReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
-                // Any volume change during our fade window = user pressed volume key
                 if (intent.action == "android.media.VOLUME_CHANGED_ACTION") {
                     val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
                     if (streamType == AudioManager.STREAM_MUSIC) {
@@ -171,12 +176,11 @@ class PlaybackController(private val context: Context) {
                         // Clean up old entries (older than 2 seconds)
                         internalVolumeChanges.removeAll { now - it.second > 2000L }
                         
-                        // Check if this volume was set internally recently
                         val isInternal = internalVolumeChanges.any { it.first == currentVol }
                         if (isInternal) {
-                            Log.d(TAG, "Volume changed internally to $currentVol, ignoring")
+                            Log.d(TAG, "Volume change event ($currentVol) matched internal fade step — ignoring")
                         } else {
-                            Log.i(TAG, "Volume changed externally to $currentVol, user cancelled fade")
+                            Log.i(TAG, "Volume change event ($currentVol) detected from EXTERNAL USER KEY PRESS! Triggering cancellation.")
                             userCancelled = true
                         }
                     }
@@ -185,11 +189,17 @@ class PlaybackController(private val context: Context) {
         }
         val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
         context.registerReceiver(volumeReceiver, filter, Context.RECEIVER_EXPORTED)
+        Log.i(TAG, "Registered VOLUME_CHANGED_ACTION receiver for fade window")
     }
 
     private fun unregisterVolumeReceiver() {
         volumeReceiver?.let {
-            try { context.unregisterReceiver(it) } catch (_: Exception) {}
+            try {
+                context.unregisterReceiver(it)
+                Log.d(TAG, "Successfully unregistered volumeReceiver")
+            } catch (e: Exception) {
+                Log.w(TAG, "Unregistering volumeReceiver failed: ${e.message}")
+            }
             volumeReceiver = null
         }
     }

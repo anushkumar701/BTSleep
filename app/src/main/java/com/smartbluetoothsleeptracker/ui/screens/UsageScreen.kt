@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UsageScreen(
     viewModel: UsageViewModel,
@@ -69,124 +71,160 @@ fun UsageScreen(
             stat = selectedDevice!!,
             onDismiss = { selectedDevice = null },
             onToggleFavorite = { viewModel.toggleFavorite(it) },
-            onResetUsage = { viewModel.resetUsageForDevice(it); selectedDevice = null },
-            onRemoveDevice = { viewModel.removeDevice(it); selectedDevice = null },
+            onResetUsage = { viewModel.scheduleResetUsage(it); selectedDevice = null },
+            onRemoveDevice = { viewModel.scheduleRemoveDevice(it); selectedDevice = null },
             onSetType = { addr, type -> viewModel.setDeviceType(addr, type) }
         )
     }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(
-            top = 20.dp,
-            bottom = 24.dp,
-            start = 24.dp, end = 24.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Header
-        item {
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Column {
-                    Text("Usage", style = MaterialTheme.typography.displaySmall,
-                        fontWeight = FontWeight.Black, color = TextPrimary)
-                    Text("Track your listening patterns", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                }
-                if (state.totalSessions > 0) {
-                    IconButton(
-                        onClick = { showClearDialog = true },
-                        modifier = Modifier.background(StatusRed.copy(0.1f), CircleShape)
-                    ) {
-                        Icon(Icons.Rounded.DeleteSweep, null, tint = StatusRed)
-                    }
-                }
-            }
-        }
-
-        // Period selector
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth()
-                    .background(Surface1, RoundedCornerShape(14.dp))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+    Box(modifier = modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = { viewModel.refresh() },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+                contentPadding = PaddingValues(
+                    top = 20.dp,
+                    bottom = 32.dp,
+                    start = 24.dp, end = 24.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                UsagePeriod.entries.forEach { p ->
-                    val selected = state.period == p
-                    Box(
-                        Modifier.weight(1f)
-                            .background(if (selected) AccentBlue else Color.Transparent, RoundedCornerShape(10.dp))
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { viewModel.setPeriod(p) }
-                            .padding(vertical = 12.dp),
-                        Alignment.Center
+                // Header
+                item {
+                    Column {
+                        Text("Usage History", style = MaterialTheme.typography.displaySmall,
+                            fontWeight = FontWeight.Black, color = TextPrimary)
+                        Text("Tracking bluetooth sleep timer sessions",
+                            style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                    }
+                }
+
+                // Period chips
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().background(Surface1, RoundedCornerShape(14.dp)).padding(4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        Text(
-                            when (p) {
-                                UsagePeriod.TODAY -> "Today"
-                                UsagePeriod.WEEK -> "Week"
-                                UsagePeriod.MONTH -> "Month"
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) Color.White else TextSecondary
-                        )
+                        UsagePeriod.entries.forEach { period ->
+                            val selected = state.period == period
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(if (selected) AccentBlue else Color.Transparent, RoundedCornerShape(10.dp))
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { viewModel.setPeriod(period) }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = period.name.lowercase().replaceFirstChar { it.uppercase() },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (selected) TextOnAccent else TextSecondary,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Bar Chart
+                item {
+                    DynamicBarChart(title = state.chartTitle, items = state.chartItems)
+                }
+
+                // Stats Cards
+                item {
+                    Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
+                        StatCard(Modifier.weight(1f), "Total", formatDuration(state.totalMinutes.toLong() * 60_000L))
+                        StatCard(Modifier.weight(1f), "Sessions", "${state.totalSessions}")
+                        StatCard(Modifier.weight(1f), "Devices", "${state.totalDevices}")
+                    }
+                }
+
+                // Device list
+                if (state.deviceStats.isNotEmpty()) {
+                    item {
+                        Text("DEVICES", style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold, color = TextTertiary, letterSpacing = 1.sp)
+                    }
+                    items(state.deviceStats, key = { it.device.address }) { stat ->
+                        DeviceRow(stat = stat, onClick = { selectedDevice = stat })
+                    }
+                }
+
+                // Sessions
+                if (state.sessions.isNotEmpty()) {
+                    item { Spacer(Modifier.height(4.dp)) }
+                    item {
+                        Text("SESSIONS", style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold, color = TextTertiary, letterSpacing = 1.sp)
+                    }
+                    items(state.sessions.take(20), key = { it.id }) { session ->
+                        SessionRow(session = session, onDelete = { viewModel.deleteSession(session.id) })
+                    }
+                }
+
+                // Enhanced empty state
+                if (state.sessions.isEmpty() && state.deviceStats.isEmpty()) {
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().padding(top = 24.dp)
+                                .background(Surface1, RoundedCornerShape(20.dp))
+                                .padding(48.dp),
+                            Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Box(
+                                        Modifier.size(80.dp)
+                                            .background(AccentBlue.copy(0.08f), CircleShape)
+                                    )
+                                    Icon(
+                                        Icons.Rounded.NightsStay, null,
+                                        tint = AccentBlue.copy(0.35f),
+                                        modifier = Modifier.size(44.dp)
+                                    )
+                                }
+                                Spacer(Modifier.height(20.dp))
+                                Text(
+                                    "No usage data yet",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "Start a sleep timer to begin tracking\nyour listening patterns",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
                     }
                 }
             }
-        }
+        } // end PullToRefreshBox
 
-        // 7-day bar chart
-        item { WeeklyChart(state.dailyUsage) }
-
-        // Stats row
-        item {
-            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
-                StatCard(Modifier.weight(1f), "Total", formatDuration(state.totalMinutes.toLong() * 60_000L))
-                StatCard(Modifier.weight(1f), "Sessions", "${state.totalSessions}")
-                StatCard(Modifier.weight(1f), "Devices", "${state.totalDevices}")
-            }
-        }
-
-        // Device list
-        if (state.deviceStats.isNotEmpty()) {
-            item {
-                Text("DEVICES", style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold, color = TextTertiary, letterSpacing = 1.sp)
-            }
-            items(state.deviceStats, key = { it.device.address }) { stat ->
-                DeviceRow(stat = stat, onClick = { selectedDevice = stat })
-            }
-        }
-
-        // Sessions
-        if (state.sessions.isNotEmpty()) {
-            item { Spacer(Modifier.height(4.dp)) }
-            item {
-                Text("SESSIONS", style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold, color = TextTertiary, letterSpacing = 1.sp)
-            }
-            items(state.sessions.take(20), key = { it.id }) { session ->
-                SessionRow(session = session, onDelete = { viewModel.deleteSession(session.id) })
-            }
-        }
-
-        // Empty
-        if (state.sessions.isEmpty() && state.deviceStats.isEmpty()) {
-            item {
-                Box(
-                    Modifier.fillMaxWidth().padding(top = 24.dp)
-                        .background(Surface1, RoundedCornerShape(20.dp))
-                        .padding(48.dp),
-                    Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.Analytics, null, tint = AccentBlue.copy(0.3f), modifier = Modifier.size(56.dp))
-                        Spacer(Modifier.height(16.dp))
-                        Text("No usage data yet", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
-                        Text("Start a sleep timer to begin tracking", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        // Undo Snackbar
+        val undo = state.undoState
+        if (undo.message != null) {
+            Snackbar(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp),
+                action = {
+                    TextButton(onClick = { viewModel.undoPendingAction() }) {
+                        Text("UNDO", color = AccentBlue, fontWeight = FontWeight.Bold)
                     }
-                }
+                },
+                containerColor = Surface2,
+                contentColor = TextPrimary
+            ) {
+                Text(undo.message)
             }
         }
     }
@@ -205,25 +243,21 @@ private fun StatCard(modifier: Modifier, label: String, value: String) {
 }
 
 @Composable
-private fun WeeklyChart(dailyUsage: List<com.smartbluetoothsleeptracker.data.db.DailyUsageEntity>) {
-    val today = LocalDate.now()
-    val fmt = DateTimeFormatter.ISO_LOCAL_DATE
+private fun DynamicBarChart(
+    title: String,
+    items: List<com.smartbluetoothsleeptracker.viewmodel.ChartBarItem>
+) {
+    if (items.isEmpty()) return
 
-    val days = (6 downTo 0).map { ago ->
-        val d = today.minusDays(ago.toLong())
-        val dateStr = d.format(fmt)
-        val mins = dailyUsage.filter { it.date == dateStr }.sumOf { it.totalMinutes }
-        val label = if (ago == 0) "Today" else d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
-        Triple(label, mins, ago == 0)
-    }
-    val maxMin = days.maxOf { it.second }.coerceAtLeast(60)
+    val totalMinutes = items.sumOf { it.minutes }
+    val maxMin = items.maxOf { it.minutes }.coerceAtLeast(60)
 
     Column(
         Modifier.fillMaxWidth().background(Surface1, RoundedCornerShape(24.dp)).padding(20.dp)
     ) {
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-            Text("Last 7 Days", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Text("${days.sumOf { it.second }}m total", style = MaterialTheme.typography.labelMedium, color = AccentBlue, fontWeight = FontWeight.SemiBold)
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Text("${formatMinutes(totalMinutes)} total", style = MaterialTheme.typography.labelMedium, color = AccentBlue, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(24.dp))
 
@@ -233,7 +267,7 @@ private fun WeeklyChart(dailyUsage: List<com.smartbluetoothsleeptracker.data.db.
                 modifier = Modifier.fillMaxSize().padding(bottom = 24.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                listOf("${maxMin}m", "${maxMin / 2}m", "0m").forEach { valLabel ->
+                listOf(formatMinutes(maxMin), formatMinutes(maxMin / 2), "0m").forEach { valLabel ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -265,26 +299,26 @@ private fun WeeklyChart(dailyUsage: List<com.smartbluetoothsleeptracker.data.db.
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
-                days.forEach { (_, minutes, _) ->
-                    val frac = (minutes / maxMin.toFloat()).coerceIn(0.02f, 1f)
+                items.forEach { item ->
+                    val frac = (item.minutes / maxMin.toFloat()).coerceIn(0.02f, 1f)
                     val color = when {
-                        minutes > 120 -> StatusRed
-                        minutes > 60 -> StatusOrange
+                        item.minutes > 120 -> StatusRed
+                        item.minutes > 60 -> StatusOrange
                         else -> AccentBlue
                     }
                     val animFrac by animateFloatAsState(
                         targetValue = frac,
                         animationSpec = tween(800, easing = FastOutSlowInEasing),
                         label = "barHeight"
-                      )
+                    )
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.weight(1f)
                     ) {
-                        if (minutes > 0) {
+                        if (item.minutes > 0) {
                             Text(
-                                "${minutes}m",
+                                formatMinutes(item.minutes),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = color,
                                 fontWeight = FontWeight.Bold,
@@ -313,12 +347,12 @@ private fun WeeklyChart(dailyUsage: List<com.smartbluetoothsleeptracker.data.db.
             modifier = Modifier.fillMaxWidth().padding(start = 40.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            days.forEach { (label, _, isToday) ->
+            items.forEach { item ->
                 Text(
-                    text = label,
+                    text = item.label,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isToday) AccentBlue else TextTertiary,
-                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                    color = if (item.isHighlighted) AccentBlue else TextTertiary,
+                    fontWeight = if (item.isHighlighted) FontWeight.Bold else FontWeight.Normal,
                     fontSize = 10.sp,
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
@@ -379,11 +413,30 @@ private fun DeviceRow(stat: DeviceUsageStat, onClick: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(4.dp))
-            Text(
-                "${stat.sessionCount} sessions",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "${stat.sessionCount} sessions",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary
+                )
+                val isVerified = !stat.device.workingDisconnectMethod.isNullOrBlank()
+                Text(
+                    text = if (isVerified) "Verified" else "Not yet verified",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isVerified) StatusGreen else TextTertiary,
+                    fontSize = 10.sp,
+                    modifier = Modifier
+                        .background(
+                            if (isVerified) StatusGreen.copy(0.12f) else Surface2,
+                            RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
         }
         Spacer(Modifier.width(8.dp))
         Icon(Icons.Rounded.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(20.dp))
@@ -402,16 +455,16 @@ private fun SessionRow(session: SessionEntity, onDelete: () -> Unit) {
             modifier = Modifier
                 .size(38.dp)
                 .background(
-                    if (session.disconnectConfirmed) StatusGreen.copy(0.12f) else StatusOrange.copy(0.12f),
+                    if (session.disconnectConfirmed) StatusGreen.copy(0.12f) else Surface3,
                     CircleShape
                 ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = if (session.disconnectConfirmed) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                imageVector = if (session.disconnectConfirmed) Icons.Rounded.CheckCircle else Icons.Rounded.PowerSettingsNew,
                 contentDescription = null,
-                tint = if (session.disconnectConfirmed) StatusGreen else StatusOrange,
-                modifier = Modifier.size(20.dp)
+                tint = if (session.disconnectConfirmed) StatusGreen else TextSecondary,
+                modifier = Modifier.size(18.dp)
             )
         }
         Spacer(Modifier.width(14.dp))
@@ -432,19 +485,18 @@ private fun SessionRow(session: SessionEntity, onDelete: () -> Unit) {
             )
         }
         Spacer(Modifier.width(12.dp))
-        if (session.actualDurationMin != null) {
-            Box(
-                Modifier
-                    .background(Surface3, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    "Played: ${session.actualDurationMin}m / Set: ${session.plannedDurationMin}m",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-            }
+        val playedMin = session.actualDurationMin ?: 0
+        Box(
+            Modifier
+                .background(Surface3, RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text(
+                "Played: ${formatMinutes(playedMin)} · Set: ${formatMinutes(session.plannedDurationMin)}",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
         }
         Spacer(Modifier.width(8.dp))
         IconButton(
@@ -556,8 +608,18 @@ private fun BottomSheetAction(
 
 private fun formatDuration(millis: Long): String {
     if (millis <= 0L) return "0m"
-    val m = millis / 60_000L; val h = m / 60
-    return if (h > 0) "${h}h ${m % 60}m" else "${m}m"
+    return formatMinutes((millis / 60_000L).toInt())
+}
+
+private fun formatMinutes(minutes: Int): String {
+    if (minutes <= 0) return "0m"
+    val h = minutes / 60
+    val remM = minutes % 60
+    return when {
+        h > 0 && remM > 0 -> "${h}h ${remM}m"
+        h > 0 -> "${h}h"
+        else -> "${remM}m"
+    }
 }
 
 private fun formatDate(ms: Long): String = runCatching {

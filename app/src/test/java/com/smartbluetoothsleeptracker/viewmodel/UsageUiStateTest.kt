@@ -14,7 +14,7 @@ class UsageUiStateTest {
         assertEquals(UsagePeriod.WEEK, state.period)
         assertEquals(0, state.sessions.size)
         assertEquals(0, state.deviceStats.size)
-        assertEquals(0, state.dailyUsage.size)
+        assertEquals(0, state.chartItems.size)
         assertEquals(0, state.totalMinutes)
         assertEquals(0, state.totalSessions)
         assertEquals(0, state.totalDevices)

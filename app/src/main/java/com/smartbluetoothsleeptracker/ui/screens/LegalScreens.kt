@@ -51,45 +51,11 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                 "is not available on the Google Play Store."
             }
 
-            LegalSection("Data Collection") {
-                "SleepBT does NOT collect, transmit, or store any personal data on external servers.\n\n" +
-                "All data — including device records, session history, usage statistics, and preferences — " +
-                "is stored exclusively on your device using a local Room database and Android DataStore.\n\n" +
-                "No analytics, telemetry, crash reports, or usage data is sent to any server. " +
-                "There is no network communication of any kind."
-            }
-
-            LegalSection("Permissions Used") {
-                "• Bluetooth Connect & Scan — Required to detect paired audio devices and disconnect " +
-                "them when the sleep timer expires.\n\n" +
-                "• Notifications — Used to display timer countdown, warnings before expiry, cooldown " +
-                "status, and disconnect results.\n\n" +
-                "• Foreground Service — Ensures the timer continues running when the app is backgrounded " +
-                "or the screen is off.\n\n" +
-                "• Battery Optimization Exemption — Prevents the operating system from killing the " +
-                "timer service during sleep.\n\n" +
-                "• Notification Listener (optional) — Enables fetching active media sessions to " +
-                "pause playback on timer expiry. No notification content is read or stored.\n\n" +
-                "• Device Admin (optional) — Enables locking the screen on timer expiry. Can be " +
-                "revoked at any time via system settings."
-            }
-
-            LegalSection("Bluetooth Actions") {
-                "All Bluetooth disconnection and screen-off actions happen entirely " +
-                "on your device using Android system APIs. No remote commands are sent or received.\n\n" +
-                "The app uses reflection-based APIs for control. These methods operate locally and do not require or establish any network connection."
-            }
-
-            LegalSection("Health Data") {
-                "The Ear Health feature provides duration-based estimates of listening time. " +
-                "It does not measure volume levels or sound pressure. The risk assessments shown " +
-                "are approximations based on time only and do not constitute medical advice.\n\n" +
-                "All health-related data is stored locally and is never shared."
-            }
-
-            LegalSection("Third-Party Services") {
-                "SleepBT does not integrate with any third-party analytics, advertising, or " +
-                "tracking services. The app operates completely offline."
+            LegalSection("Data Collection & Firebase") {
+                "SleepBT uses Firebase Analytics, Cloud Messaging (FCM), and Firebase Authentication (anonymous) solely to count active installs and aggregate user activity.\n\n" +
+                "The app registers an anonymous push notification token (not used to send visible notifications) solely to estimate install and uninstall counts. No personal data is collected.\n\n" +
+                "An anonymous device identifier (UID) along with install (installedAt) and last-active (lastActiveAt) timestamps are stored in Firebase Cloud Firestore.\n\n" +
+                "No personal information, real identity, device name, or Bluetooth usage data is ever sent to Firebase or external servers. All audio session metrics and device presets remain 100% on your device."
             }
 
             LegalSection("Data Deletion") {

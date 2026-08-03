@@ -24,6 +24,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -117,21 +120,67 @@ fun SettingsScreen(
         }
         if (s.playbackStopEnabled) {
             item {
-                SettingRow(
-                    icon = Icons.Rounded.Speed,
-                    title = "Fade-Out Duration",
-                    subtitle = "${s.fadeOutDurationSeconds} seconds",
-                    trailing = {
-                        Slider(
-                            value = s.fadeOutDurationSeconds.toFloat(),
-                            onValueChange = { viewModel.setFadeOutDuration(it.toInt()) },
-                            valueRange = 3f..30f,
-                            steps = 26,
-                            modifier = Modifier.width(140.dp),
-                            colors = SliderDefaults.colors(thumbColor = AccentBlue, activeTrackColor = AccentBlue)
+                var textInput by remember(s.fadeOutDurationSeconds) { mutableStateOf(s.fadeOutDurationSeconds.toString()) }
+
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Surface1, RoundedCornerShape(16.dp))
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.Speed, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Fade-Out Duration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("Ramp down volume (3–60 seconds)", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                        }
+                        OutlinedTextField(
+                            value = textInput,
+                            onValueChange = { input ->
+                                textInput = input.filter { it.isDigit() }.take(2)
+                                val num = textInput.toIntOrNull()
+                                if (num != null) {
+                                    viewModel.setFadeOutDuration(num.coerceIn(3, 60))
+                                }
+                            },
+                            modifier = Modifier.width(68.dp),
+                            textStyle = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                color = TextPrimary
+                            ),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentBlue,
+                                unfocusedBorderColor = SurfaceBorder,
+                                focusedContainerColor = Surface2,
+                                unfocusedContainerColor = Surface2
+                            )
                         )
+                        Spacer(Modifier.width(6.dp))
+                        Text("sec", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     }
-                )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Slider(
+                        value = s.fadeOutDurationSeconds.coerceIn(3, 60).toFloat(),
+                        onValueChange = {
+                            textInput = it.toInt().toString()
+                            viewModel.setFadeOutDuration(it.toInt())
+                        },
+                        valueRange = 3f..60f,
+                        steps = 56,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = SliderDefaults.colors(thumbColor = AccentBlue, activeTrackColor = AccentBlue)
+                    )
+                }
             }
             item {
                 InfoCard(
@@ -324,7 +373,7 @@ fun SettingsScreen(
                     Spacer(Modifier.width(14.dp))
                     Column {
                         Text("SleepBT", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text("v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                        Text("Version 1.0", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     }
                 }
                 Spacer(Modifier.height(12.dp))

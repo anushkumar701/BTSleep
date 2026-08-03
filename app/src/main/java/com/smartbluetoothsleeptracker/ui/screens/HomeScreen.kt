@@ -2,8 +2,10 @@ package com.smartbluetoothsleeptracker.ui.screens
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -49,7 +52,12 @@ fun HomeScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val view = LocalView.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val hapticEnabled = state.settings.hapticFeedbackEnabled
+
+    LaunchedEffect(Unit) {
+        com.smartbluetoothsleeptracker.core.firebase.FirebaseManager.logHomeScreenLoad(context)
+    }
 
     // Helper to conditionally perform haptic feedback
     fun doHaptic(type: Int = HapticFeedbackConstants.LONG_PRESS) {
@@ -75,7 +83,8 @@ fun HomeScreen(
         ConnectionStatusBar(
             devices = state.connectedDevices,
             btEnabled = state.btEnabled,
-            cooldownActive = state.cooldown.active
+            cooldownActive = state.cooldown.active,
+            isDisconnectReady = state.isDisconnectReady
         )
 
         Spacer(Modifier.height(16.dp))
@@ -100,8 +109,39 @@ fun HomeScreen(
                 onMinutesChange = { viewModel.setMinutesEphemeral(it) },
                 onMinutesChangeFinished = { viewModel.saveMinutes(it) },
                 view = view,
-                hapticEnabled = hapticEnabled
+                hapticEnabled = hapticEnabled,
+                lastUsedPreset = state.lastUsedPreset,
+                onPresetSelected = { preset ->
+                    viewModel.saveLastUsedPreset(preset)
+                }
             )
+        }
+
+        // ── Smart Duration Suggestion ──────────────────────────────────
+        if (!state.isTimerRunning && state.suggestedMinutes != null) {
+            Spacer(Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .background(AccentPurple.copy(0.1f), RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { viewModel.applySuggestion(state.suggestedMinutes!!) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.AutoAwesome, null,
+                        tint = AccentPurple,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        state.suggestionLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AccentPurple,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.weight(1f))
@@ -110,57 +150,123 @@ fun HomeScreen(
         if (state.isTimerRunning) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedButton(
                     onClick = {
                         doHaptic()
                         viewModel.cancelTimer()
                     },
-                    modifier = Modifier.weight(1f).height(56.dp),
+                    modifier = Modifier.weight(1f).height(54.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
                     border = ButtonDefaults.outlinedButtonBorder(enabled = true)
                 ) {
-                    Icon(Icons.Rounded.Close, null, Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Cancel", fontWeight = FontWeight.Bold)
+                    Icon(Icons.Rounded.Close, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
+
+                Button(
+                    onClick = {
+                        doHaptic()
+                        if (state.isPaused) viewModel.resumeTimer() else viewModel.pauseTimer()
+                    },
+                    modifier = Modifier.weight(1f).height(54.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (state.isPaused) StatusOrange else Surface3)
+                ) {
+                    Icon(
+                        if (state.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                        null,
+                        Modifier.size(18.dp),
+                        tint = if (state.isPaused) Color.White else TextPrimary
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (state.isPaused) "Resume" else "Pause",
+                        fontWeight = FontWeight.Bold,
+                        color = if (state.isPaused) Color.White else TextPrimary,
+                        fontSize = 13.sp
+                    )
+                }
+
                 Button(
                     onClick = {
                         doHaptic()
                         viewModel.extendTimer()
                     },
-                    modifier = Modifier.weight(1f).height(56.dp),
+                    modifier = Modifier.weight(1f).height(54.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = AccentPurple)
                 ) {
-                    Icon(Icons.Rounded.Add, null, Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Extend", fontWeight = FontWeight.Bold)
+                    Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Extend", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         } else {
-            Button(
-                onClick = {
-                    doHaptic()
-                    viewModel.startTimer()
-                },
-                enabled = state.connectedDevices.isNotEmpty() && state.btEnabled,
-                modifier = Modifier.fillMaxWidth().height(60.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentBlue,
-                    disabledContainerColor = Surface3
-                )
-            ) {
-                Icon(Icons.Rounded.NightsStay, null, Modifier.size(24.dp))
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    "Start Sleep Timer",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
+            // ── Breathing Start Button ─────────────────────────────────
+            val infiniteTransition = rememberInfiniteTransition(label = "breathe")
+            val breatheScale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.035f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(2000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "breatheScale"
+            )
+            val glowAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.0f,
+                targetValue = 0.25f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(2000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "glowAlpha"
+            )
+
+            val isEnabled = state.connectedDevices.isNotEmpty() && state.btEnabled
+
+            Box(modifier = Modifier.fillMaxWidth()) {
+                // Glow ring behind button
+                if (isEnabled) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .padding(horizontal = 4.dp)
+                            .background(
+                                AccentBlue.copy(alpha = glowAlpha),
+                                RoundedCornerShape(20.dp)
+                            )
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        doHaptic()
+                        viewModel.startTimer()
+                    },
+                    enabled = isEnabled,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .then(if (isEnabled) Modifier.scale(breatheScale) else Modifier),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentBlue,
+                        disabledContainerColor = Surface3
+                    )
+                ) {
+                    Icon(Icons.Rounded.NightsStay, null, Modifier.size(24.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Start Sleep Timer",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
             }
 
             if (state.connectedDevices.isEmpty() || !state.btEnabled) {
@@ -185,7 +291,8 @@ fun HomeScreen(
 private fun ConnectionStatusBar(
     devices: List<ConnectedDevice>,
     btEnabled: Boolean,
-    cooldownActive: Boolean
+    cooldownActive: Boolean,
+    isDisconnectReady: Boolean
 ) {
     Row(
         modifier = Modifier
@@ -213,14 +320,31 @@ private fun ConnectionStatusBar(
                 }
                 devices.isNotEmpty() -> {
                     val primary = devices.firstOrNull { it.isFavorite } ?: devices.first()
-                    Text(
-                        primary.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            primary.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = if (isDisconnectReady) "Ready" else "Unverified",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isDisconnectReady) StatusGreen else StatusOrange,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .background(
+                                    (if (isDisconnectReady) StatusGreen else StatusOrange).copy(0.12f),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                     if (devices.size > 1) {
                         Text(
                             "+${devices.size - 1} more",
@@ -355,7 +479,7 @@ private fun CountdownDisplay(remainingMs: Long, totalDurationMs: Long) {
     }
 }
 
-// ── Rotary Dial ────────────────────────────────────────────────────────
+// ── Rotary Dial with Fine/Coarse Adjustment ────────────────────────────
 
 @Composable
 private fun RotaryDial(
@@ -363,7 +487,9 @@ private fun RotaryDial(
     onMinutesChange: (Long) -> Unit,
     onMinutesChangeFinished: (Long) -> Unit,
     view: android.view.View,
-    hapticEnabled: Boolean = true
+    hapticEnabled: Boolean = true,
+    lastUsedPreset: Long = 0L,
+    onPresetSelected: (Long) -> Unit = {}
 ) {
     val fraction = ((minutes - MIN_MIN).toFloat() / (MAX_MIN - MIN_MIN).toFloat()).coerceIn(0f, 1f)
     val sweepAngle = fraction * DIAL_SWEEP
@@ -371,9 +497,19 @@ private fun RotaryDial(
     var lastSnapped by remember { mutableStateOf(minutes) }
     var centerPx by remember { mutableStateOf(Offset.Zero) }
     var sizePx by remember { mutableStateOf(0f) }
+    var isFineMode by remember { mutableStateOf(false) }
+    var showModeIndicator by remember { mutableStateOf(false) }
 
     LaunchedEffect(minutes) {
         lastSnapped = minutes
+    }
+
+    // Auto-hide mode indicator after drag ends
+    LaunchedEffect(showModeIndicator) {
+        if (showModeIndicator) {
+            kotlinx.coroutines.delay(1500)
+            showModeIndicator = false
+        }
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
@@ -419,41 +555,88 @@ private fun RotaryDial(
                         }
                     }
                     .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragEnd = {
-                                onMinutesChangeFinished(lastSnapped)
-                            },
-                            onDragCancel = {
-                                onMinutesChangeFinished(lastSnapped)
-                            },
-                            onDrag = { change, _ ->
-                                change.consume()
-                                val dx = change.position.x - centerPx.x
-                                val dy = change.position.y - centerPx.y
-                                val rawAngle = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
-                                val snapped = if (rawAngle > 45.0 && rawAngle < 135.0) {
-                                    if (rawAngle > 90.0) MIN_MIN else MAX_MIN
-                                } else {
-                                    val dialAngle = ((rawAngle.toFloat() - DIAL_START + 360f) % 360f).coerceIn(0f, DIAL_SWEEP)
-                                    val frac = dialAngle / DIAL_SWEEP
-                                    (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            var fineDetected = false
+                            var dragStarted = false
+                            val downTime = System.currentTimeMillis()
+                            val longPressThreshold = 300L
+
+                            // Wait for either movement or long press
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+
+                                if (!change.pressed) {
+                                    // Finger lifted before drag
+                                    if (dragStarted) {
+                                        onMinutesChangeFinished(lastSnapped)
+                                        showModeIndicator = false
+                                    }
+                                    break
                                 }
-                                val isJump = kotlin.math.abs(snapped - lastSnapped) > (MAX_MIN - MIN_MIN) / 2
-                                val finalSnapped = if (isJump) {
-                                    if (lastSnapped < (MAX_MIN - MIN_MIN) / 2) MIN_MIN else MAX_MIN
-                                } else {
-                                    snapped
-                                }
-                                if (finalSnapped != lastSnapped) {
-                                    lastSnapped = finalSnapped
+
+                                val elapsed = System.currentTimeMillis() - downTime
+                                val moved = (change.position - down.position).getDistance() > 20f
+
+                                if (!dragStarted && moved) {
+                                    dragStarted = true
+                                    fineDetected = elapsed >= longPressThreshold
+                                    isFineMode = fineDetected
+                                    showModeIndicator = true
+                                } else if (!dragStarted && elapsed >= longPressThreshold && !moved) {
+                                    // Long press detected but no movement yet — haptic feedback
                                     if (hapticEnabled) {
                                         view.isHapticFeedbackEnabled = true
-                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
                                     }
+                                    fineDetected = true
+                                    isFineMode = true
+                                    showModeIndicator = true
                                 }
-                                onMinutesChange(finalSnapped)
+
+                                if (dragStarted) {
+                                    change.consume()
+                                    val dx = change.position.x - centerPx.x
+                                    val dy = change.position.y - centerPx.y
+                                    val rawAngle = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
+
+                                    val rawSnapped = if (rawAngle > 45.0 && rawAngle < 135.0) {
+                                        if (rawAngle > 90.0) MIN_MIN else MAX_MIN
+                                    } else {
+                                        val dialAngle = ((rawAngle.toFloat() - DIAL_START + 360f) % 360f).coerceIn(0f, DIAL_SWEEP)
+                                        val frac = dialAngle / DIAL_SWEEP
+                                        (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
+                                    }
+
+                                    // Apply step snapping: fine=1min, coarse=5min
+                                    val step = if (fineDetected) 1L else 5L
+                                    val snapped = if (step > 1) {
+                                        ((rawSnapped + step / 2) / step * step).coerceIn(MIN_MIN, MAX_MIN)
+                                    } else rawSnapped
+
+                                    val isJump = kotlin.math.abs(snapped - lastSnapped) > (MAX_MIN - MIN_MIN) / 2
+                                    val finalSnapped = if (isJump) {
+                                        if (lastSnapped < (MAX_MIN - MIN_MIN) / 2) MIN_MIN else MAX_MIN
+                                    } else {
+                                        snapped
+                                    }
+                                    if (finalSnapped != lastSnapped) {
+                                        lastSnapped = finalSnapped
+                                        if (hapticEnabled) {
+                                            view.isHapticFeedbackEnabled = true
+                                            // Lighter haptic for fine, stronger for coarse
+                                            val feedbackType = if (fineDetected)
+                                                HapticFeedbackConstants.CLOCK_TICK
+                                            else
+                                                HapticFeedbackConstants.KEYBOARD_TAP
+                                            view.performHapticFeedback(feedbackType, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                        }
+                                    }
+                                    onMinutesChange(finalSnapped)
+                                }
                             }
-                        )
+                        }
                     }
             )
 
@@ -473,23 +656,40 @@ private fun RotaryDial(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text("minutes", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+
+                // Fine/Coarse mode indicator
+                if (showModeIndicator) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        if (isFineMode) "Fine · 1m steps" else "Coarse · 5m steps",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isFineMode) AccentCyan else AccentPurple,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
 
         Spacer(Modifier.height(24.dp))
 
-        // Quick presets
+        // Quick presets with "last used" highlight
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             listOf(15L, 30L, 45L, 60L, 90L, 120L).forEach { preset ->
                 val selected = minutes == preset
+                val isLastUsed = lastUsedPreset == preset && !selected
                 Box(
                     modifier = Modifier
                         .background(
                             if (selected) AccentBlue else Surface2,
                             RoundedCornerShape(12.dp)
+                        )
+                        .then(
+                            if (isLastUsed) Modifier.border(
+                                1.5.dp, AccentBlue.copy(0.6f), RoundedCornerShape(12.dp)
+                            ) else Modifier
                         )
                         .clip(RoundedCornerShape(12.dp))
                         .clickable {
@@ -499,14 +699,19 @@ private fun RotaryDial(
                             }
                             onMinutesChange(preset)
                             onMinutesChangeFinished(preset)
+                            onPresetSelected(preset)
                         }
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     Text(
                         text = if (preset >= 60) "${preset / 60}h${if (preset % 60 > 0) "${preset % 60}" else ""}" else "${preset}m",
                         style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (selected) TextOnAccent else TextSecondary
+                        fontWeight = if (selected || isLastUsed) FontWeight.Bold else FontWeight.Medium,
+                        color = when {
+                            selected -> TextOnAccent
+                            isLastUsed -> AccentBlue
+                            else -> TextSecondary
+                        }
                     )
                 }
             }

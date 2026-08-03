@@ -34,6 +34,10 @@ fun HealthScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    LaunchedEffect(Unit) {
+        viewModel.refresh()
+    }
+
     val riskColor = when (state.risk) {
         HealthRisk.LOW -> StatusGreen
         HealthRisk.MODERATE -> StatusOrange
@@ -69,6 +73,48 @@ fun HealthScreen(
             }
         }
 
+        // Streak Card (Feature 8)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Surface1),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(StatusGreen.copy(alpha = 0.15f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.LocalFireDepartment,
+                            contentDescription = "Streak",
+                            tint = StatusGreen,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = if (state.streakDays > 0) "${state.streakDays} ${if (state.streakDays == 1) "night" else "nights"} in a row safe" else "Start your safe listening streak!",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Daily earbuds & neckband use strictly under 60m",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+            }
+        }
+
         // Risk gauge
         item {
             Column(
@@ -99,9 +145,13 @@ fun HealthScreen(
                         }
                     })
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("${state.weekAvgMinutes}", style = MaterialTheme.typography.displayMedium,
-                            fontWeight = FontWeight.Black, color = TextPrimary)
-                        Text("min/day avg", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                        Text(
+                            formatMinutes(state.weekAvgMinutes),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            color = TextPrimary
+                        )
+                        Text("daily avg", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     }
                 }
 
@@ -139,7 +189,7 @@ fun HealthScreen(
                     Text("Earbuds & neckband listening time", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                 }
                 Text(
-                    "${state.todayMinutes}m",
+                    formatMinutes(state.todayMinutes),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
                     color = when {
@@ -170,7 +220,7 @@ fun HealthScreen(
                         modifier = Modifier.fillMaxSize().padding(bottom = 24.dp),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        listOf("${maxMins}m", "${maxMins / 2}m", "0m").forEach { valLabel ->
+                        listOf(formatMinutes(maxMins), formatMinutes(maxMins / 2), "0m").forEach { valLabel ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
@@ -221,7 +271,7 @@ fun HealthScreen(
                             ) {
                                 if (mins > 0) {
                                     Text(
-                                        "${mins}m",
+                                        formatMinutes(mins),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = color,
                                         fontWeight = FontWeight.Bold,
@@ -302,3 +352,15 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) 
         Text(label, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
     }
 }
+
+private fun formatMinutes(minutes: Int): String {
+    if (minutes <= 0) return "0m"
+    val h = minutes / 60
+    val remM = minutes % 60
+    return when {
+        h > 0 && remM > 0 -> "${h}h ${remM}m"
+        h > 0 -> "${h}h"
+        else -> "${remM}m"
+    }
+}
+

@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Device activity tracking collection
+    match /devices/{deviceId} {
+      allow read: if request.auth != null && request.auth.uid == deviceId;
+      
+      allow create: if request.auth != null 
+                    && request.auth.uid == deviceId
+                    && request.resource.data.keys().hasOnly(['installedAt', 'lastActiveAt'])
+                    && request.resource.data.installedAt is timestamp
+                    && request.resource.data.lastActiveAt is timestamp;
+
+      allow update: if request.auth != null 
+                    && request.auth.uid == deviceId
+                    && request.resource.data.keys().hasOnly(['installedAt', 'lastActiveAt'])
+                    && request.resource.data.lastActiveAt is timestamp
+                    && request.resource.data.installedAt == resource.data.installedAt;
+                    
+      allow delete: if false;
+    }
+
+    // FCM tokens collection for server-side uninstall checking
+    match /fcm_tokens/{tokenId} {
+      allow create, update: if request.resource.data.token is string
+                            && request.resource.data.status == 'active';
+      allow read, delete: if false; // Only Admin SDK (Cloud Function) can read or modify status
+    }
+
+    // Aggregated metrics summary document
+    match /app_metrics/{metricId} {
+      allow read, write: if false; // Only Cloud Function Admin SDK can access
+    }
+  }
+}

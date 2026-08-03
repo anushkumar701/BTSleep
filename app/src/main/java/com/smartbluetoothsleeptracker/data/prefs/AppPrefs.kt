@@ -27,14 +27,15 @@ data class AppSettings(
     // Screen Off
     val screenOffEnabled: Boolean = false,
 
-
-
     // Haptic Feedback
     val hapticFeedbackEnabled: Boolean = true,
 
     // Notifications
     val sleepAlertsEnabled: Boolean = true,
     val warningLeadMinutes: Int = 2,
+    val weeklySummaryEnabled: Boolean = false,
+    val weeklySummaryHour: Int = 21, // 9 PM default
+    val weeklySummaryDayOfWeek: Int = 7, // Sunday (ISO: 1=Mon..7=Sun)
 
     // Service
     val foregroundServiceEnabled: Boolean = true,
@@ -46,6 +47,12 @@ data class AppSettings(
     val onboardingComplete: Boolean = false,
     val tosAcceptedTimestamp: Long = 0L,
     val tosAcceptedVersion: String = "",
+
+    // Presets
+    val lastUsedPreset: Long = 0L,
+
+    // Custom device categories (JSON array string)
+    val customCategories: String = "[]",
 
     // Persisted timer state (survives process death)
     val timerEndWallClock: Long? = null,
@@ -74,11 +81,16 @@ class AppPrefs(private val context: Context) {
                 hapticFeedbackEnabled   = prefs[HAPTIC_FEEDBACK] ?: true,
                 sleepAlertsEnabled      = prefs[SLEEP_ALERTS] ?: true,
                 warningLeadMinutes      = prefs[WARNING_LEAD] ?: 2,
+                weeklySummaryEnabled    = prefs[WEEKLY_SUMMARY] ?: false,
+                weeklySummaryHour       = prefs[WEEKLY_SUMMARY_HOUR] ?: 21,
+                weeklySummaryDayOfWeek  = prefs[WEEKLY_SUMMARY_DAY] ?: 7,
                 foregroundServiceEnabled= prefs[FG_SERVICE] ?: true,
                 themeMode               = prefs[THEME_MODE] ?: "DARK",
                 onboardingComplete      = prefs[ONBOARDING_COMPLETE] ?: false,
                 tosAcceptedTimestamp    = prefs[TOS_TIMESTAMP] ?: 0L,
                 tosAcceptedVersion      = prefs[TOS_VERSION] ?: "",
+                lastUsedPreset          = prefs[LAST_USED_PRESET] ?: 0L,
+                customCategories        = prefs[CUSTOM_CATEGORIES] ?: "[]",
                 timerEndWallClock       = prefs[TIMER_END_WALL]?.takeIf { it > 0L },
                 timerPausedRemaining    = prefs[TIMER_PAUSED]?.takeIf { it > 0L },
                 timerTargetDevices      = prefs[TIMER_TARGETS] ?: "",
@@ -106,6 +118,11 @@ class AppPrefs(private val context: Context) {
         it[TOS_TIMESTAMP] = ts
         it[TOS_VERSION] = version
     }
+    suspend fun setLastUsedPreset(m: Long)       = ds.edit { it[LAST_USED_PRESET] = m }
+    suspend fun setWeeklySummary(on: Boolean)     = ds.edit { it[WEEKLY_SUMMARY] = on }
+    suspend fun setWeeklySummaryHour(h: Int)      = ds.edit { it[WEEKLY_SUMMARY_HOUR] = h.coerceIn(0, 23) }
+    suspend fun setWeeklySummaryDay(d: Int)       = ds.edit { it[WEEKLY_SUMMARY_DAY] = d.coerceIn(1, 7) }
+    suspend fun setCustomCategories(json: String) = ds.edit { it[CUSTOM_CATEGORIES] = json }
 
     // Timer persistence
     suspend fun setTimerEnd(ms: Long?)            = ds.edit { if (ms == null) it.remove(TIMER_END_WALL) else it[TIMER_END_WALL] = ms }
@@ -137,11 +154,16 @@ class AppPrefs(private val context: Context) {
         val HAPTIC_FEEDBACK     = booleanPreferencesKey("haptic_feedback")
         val SLEEP_ALERTS        = booleanPreferencesKey("sleep_alerts")
         val WARNING_LEAD        = intPreferencesKey("warning_lead")
+        val WEEKLY_SUMMARY      = booleanPreferencesKey("weekly_summary")
+        val WEEKLY_SUMMARY_HOUR = intPreferencesKey("weekly_summary_hour")
+        val WEEKLY_SUMMARY_DAY  = intPreferencesKey("weekly_summary_day")
         val FG_SERVICE          = booleanPreferencesKey("fg_service")
         val THEME_MODE          = stringPreferencesKey("theme_mode")
         val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
         val TOS_TIMESTAMP       = longPreferencesKey("tos_timestamp")
         val TOS_VERSION         = stringPreferencesKey("tos_version")
+        val LAST_USED_PRESET    = longPreferencesKey("last_used_preset")
+        val CUSTOM_CATEGORIES   = stringPreferencesKey("custom_categories")
         val TIMER_END_WALL      = longPreferencesKey("timer_end_wall")
         val TIMER_PAUSED        = longPreferencesKey("timer_paused")
         val TIMER_TARGETS       = stringPreferencesKey("timer_targets")

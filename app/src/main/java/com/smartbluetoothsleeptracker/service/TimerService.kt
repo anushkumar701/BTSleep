@@ -6,12 +6,16 @@ import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.ServiceCompat
 import com.smartbluetoothsleeptracker.SleepBTApp
 import com.smartbluetoothsleeptracker.core.bluetooth.DisconnectResult
+import com.smartbluetoothsleeptracker.core.haptics.HapticManager
 import com.smartbluetoothsleeptracker.core.notification.AppNotifications
 import com.smartbluetoothsleeptracker.core.playback.FadeResult
 import com.smartbluetoothsleeptracker.data.db.DailyUsageEntity
@@ -30,6 +34,8 @@ class TimerService : Service() {
         const val ACTION_EXTEND = "com.sleepbt.EXTEND"
         const val ACTION_END_NOW = "com.sleepbt.END_NOW"
         const val ACTION_ALLOW_RECONNECT = "com.sleepbt.ALLOW_RECONNECT"
+        const val ACTION_PAUSE = "com.sleepbt.PAUSE"
+        const val ACTION_RESUME = "com.sleepbt.RESUME"
 
         const val EXTRA_MINUTES = "minutes"
         const val EXTRA_TARGETS = "targets" // comma-separated MAC addresses
@@ -45,15 +51,20 @@ class TimerService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tickJob: Job? = null
     private var cooldownTickJob: Job? = null
+    private var autoResumeJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     // Timer state
     private var endTimeMillis = 0L
     private var pausedRemaining: Long? = null
+    private var isPaused = false
+    private var pauseStartTime = 0L
+    private var totalPausedMs = 0L
     private var plannedMinutes = 0
     private var extendedMinutes = 0
     private var targetAddresses = listOf<String>()
     private var sessionId = 0L
+    private var sessionStartTime = 0L
     private var warningFired = false
 
     private val app get() = application as SleepBTApp
@@ -72,6 +83,8 @@ class TimerService : Service() {
             ACTION_EXTEND -> extendTimer()
             ACTION_END_NOW -> endNow()
             ACTION_ALLOW_RECONNECT -> allowReconnect()
+            ACTION_PAUSE -> pauseTimer()
+            ACTION_RESUME -> resumeTimer()
         }
         return START_STICKY
     }
@@ -82,6 +95,8 @@ class TimerService : Service() {
         targetAddresses = targets.split(",").filter { it.isNotBlank() }
         endTimeMillis = System.currentTimeMillis() + minutes * 60_000L
         pausedRemaining = null
+        isPaused = false
+        totalPausedMs = 0L
         warningFired = false
 
         // Acquire wake lock
@@ -95,6 +110,7 @@ class TimerService : Service() {
         )
 
         // Persist timer state
+        sessionStartTime = System.currentTimeMillis()
         scope.launch {
             app.prefs.setTimerEnd(endTimeMillis)
             app.prefs.setTimerPaused(null)
@@ -106,7 +122,7 @@ class TimerService : Service() {
             val session = SessionEntity(
                 deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
                 deviceName = getDeviceName(targetAddresses.firstOrNull()),
-                startTime = System.currentTimeMillis(),
+                startTime = sessionStartTime,
                 plannedDurationMin = plannedMinutes,
                 date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
             )
@@ -118,10 +134,58 @@ class TimerService : Service() {
         Log.i(TAG, "Timer started: ${minutes}m for ${targetAddresses.size} devices")
     }
 
+    private fun pauseTimer() {
+        if (isPaused) return
+        isPaused = true
+        pauseStartTime = System.currentTimeMillis()
+        pausedRemaining = (endTimeMillis - System.currentTimeMillis()).coerceAtLeast(0)
+        tickJob?.cancel()
+
+        scope.launch {
+            app.prefs.setTimerPaused(pausedRemaining)
+        }
+
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        nm.notify(
+            AppNotifications.NOTIF_TIMER,
+            AppNotifications.timerNotification(this, "Paused").build()
+        )
+
+        // Auto-resume after 2 hours (120 minutes) if paused continuously
+        autoResumeJob?.cancel()
+        autoResumeJob = scope.launch {
+            delay(2 * 60 * 60 * 1000L)
+            if (isPaused) {
+                Log.i(TAG, "Auto-resuming timer after 2h max pause limit")
+                resumeTimer()
+            }
+        }
+        Log.i(TAG, "Timer paused — remaining: ${pausedRemaining?.div(1000)}s")
+    }
+
+    private fun resumeTimer() {
+        if (!isPaused) return
+        isPaused = false
+        autoResumeJob?.cancel()
+
+        val pausedDuration = System.currentTimeMillis() - pauseStartTime
+        totalPausedMs += pausedDuration
+        endTimeMillis = System.currentTimeMillis() + (pausedRemaining ?: 0L)
+        pausedRemaining = null
+
+        scope.launch {
+            app.prefs.setTimerEnd(endTimeMillis)
+            app.prefs.setTimerPaused(null)
+        }
+
+        startTickLoop()
+        Log.i(TAG, "Timer resumed — new end time calculated")
+    }
+
     private fun startTickLoop() {
         tickJob?.cancel()
         tickJob = scope.launch {
-            while (isActive) {
+            while (isActive && !isPaused) {
                 val remaining = endTimeMillis - System.currentTimeMillis()
 
                 if (remaining <= 0) {
@@ -129,32 +193,27 @@ class TimerService : Service() {
                     return@launch
                 }
 
-                // Update notification
-                val nm = getSystemService(android.app.NotificationManager::class.java)
-                nm.notify(
-                    AppNotifications.NOTIF_TIMER,
-                    AppNotifications.timerNotification(this@TimerService, formatRemaining()).build()
-                )
-
-                // Check warning
+                // Check warning notification threshold
                 val settings = app.prefs.settings.first()
                 if (settings.sleepAlertsEnabled && !warningFired) {
                     val warningMs = settings.warningLeadMinutes * 60_000L
                     if (remaining <= warningMs) {
                         warningFired = true
-                        val minLeft = (remaining / 60_000L).toInt().coerceAtLeast(1)
+                        val nm = getSystemService(android.app.NotificationManager::class.java)
                         nm.notify(
                             AppNotifications.NOTIF_WARNING,
-                            AppNotifications.warningNotification(this@TimerService, minLeft).build()
+                            AppNotifications.warningNotification(this@TimerService, settings.warningLeadMinutes).build()
                         )
+                        HapticManager.vibrateWarning(this@TimerService)
                     }
                 }
 
-                // Broadcast remaining time for UI
-                sendBroadcast(Intent("com.sleepbt.TICK").apply {
-                    putExtra("remaining", remaining)
-                    setPackage(packageName)
-                })
+                // Update live status notification
+                val nm = getSystemService(android.app.NotificationManager::class.java)
+                nm.notify(
+                    AppNotifications.NOTIF_TIMER,
+                    AppNotifications.timerNotification(this@TimerService, formatRemaining()).build()
+                )
 
                 delay(1000)
             }
@@ -162,7 +221,7 @@ class TimerService : Service() {
     }
 
     /**
-     * EXPIRY SEQUENCE (ordered):
+     * EXPIRY SEQUENCE:
      * 1. Playback stop (volume fade)
      * 2. Bluetooth disconnect
      * 3. Screen off
@@ -182,11 +241,9 @@ class TimerService : Service() {
 
                     if (fadeResult == FadeResult.CANCELLED_BY_USER) {
                         Log.i(TAG, "Fade cancelled by volume key — extending timer, skipping disconnect")
-                        // Same as tapping notification Extend
                         performExtend()
                         return@launch
                     }
-                    // COMPLETED or DISABLED → continue to step 2
                 }
 
                 // ── STEP 2: Bluetooth Disconnect ───────────────────────────
@@ -215,9 +272,11 @@ class TimerService : Service() {
                     app.screenController.lockScreen()
                 }
 
-                // ── Session & Usage Bookkeeping ────────────────────────────
-                val startTime = endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L
-                val actualMin = ((System.currentTimeMillis() - startTime) / 60_000L).toInt()
+                // ── Session & Usage Bookkeeping (Excluding Paused Ms) ──────
+                val startTime = if (sessionStartTime > 0L) sessionStartTime else (endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L)
+                val totalActiveMs = (System.currentTimeMillis() - startTime - totalPausedMs).coerceAtLeast(0)
+                val actualMin = (totalActiveMs / 60_000L).toInt().coerceAtLeast(1)
+
                 app.db.sessionDao().update(
                     SessionEntity(
                         id = sessionId,
@@ -247,16 +306,29 @@ class TimerService : Service() {
                     )
                 }
 
-                // Notify result
-                val nm = getSystemService(android.app.NotificationManager::class.java)
-                nm.cancel(AppNotifications.NOTIF_WARNING)
-                nm.notify(
-                    AppNotifications.NOTIF_DISCONNECT_RESULT,
-                    AppNotifications.disconnectResultNotification(
-                        this@TimerService, result.success,
-                        getDeviceName(targetAddresses.firstOrNull())
-                    ).build()
-                )
+                // ── HAPTICS & OUTCOME NOTIFICATION ──────────────────────────
+                HapticManager.vibrateDisconnected(this@TimerService)
+
+                val devName = getDeviceName(targetAddresses.firstOrNull())
+                val outcomeMsg = if (result.success) {
+                    "Disconnected $devName successfully"
+                } else {
+                    "Couldn't auto-disconnect $devName — ended manually"
+                }
+
+                if (settings.sleepAlertsEnabled) {
+                    val nm = getSystemService(android.app.NotificationManager::class.java)
+                    nm.cancel(AppNotifications.NOTIF_WARNING)
+                    nm.notify(
+                        AppNotifications.NOTIF_DISCONNECT_RESULT,
+                        AppNotifications.disconnectResultNotification(this@TimerService, result.success, devName).build()
+                    )
+                }
+
+                // Show toast for immediate feedback
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(applicationContext, outcomeMsg, Toast.LENGTH_LONG).show()
+                }
 
                 // Start cooldown ticking if active
                 if (settings.reconnectBlockerEnabled && settings.cooldownSeconds > 0) {
@@ -274,33 +346,44 @@ class TimerService : Service() {
 
     private fun cancelTimer() {
         tickJob?.cancel()
+        autoResumeJob?.cancel()
         scope.launch {
             if (sessionId > 0) {
                 val existing = app.db.sessionDao().getOrphanedSession()
                 if (existing != null) {
+                    val startTime = if (sessionStartTime > 0L) sessionStartTime else existing.startTime
+                    val totalActiveMs = (System.currentTimeMillis() - startTime - totalPausedMs).coerceAtLeast(0)
+                    val playedMin = (totalActiveMs / 60_000L).toInt().coerceAtLeast(1)
                     app.db.sessionDao().update(existing.copy(
                         endTime = System.currentTimeMillis(),
-                        actualDurationMin = 0,
+                        actualDurationMin = playedMin,
                         disconnectConfirmed = false
                     ))
                 }
             }
             app.prefs.clearTimer()
         }
+
+        HapticManager.vibrateDisconnected(this)
+
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(applicationContext, "Session ended manually", Toast.LENGTH_SHORT).show()
+        }
+
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         sendBroadcast(Intent("com.sleepbt.TIMER_END").setPackage(packageName))
-        Log.i(TAG, "Timer cancelled")
+        Log.i(TAG, "Timer cancelled — session saved with actual active played duration")
     }
 
     private fun extendTimer() {
-        scope.launch { performExtend() }
+        scope.launch {
+            performExtend()
+            HapticManager.vibrateExtend(this@TimerService)
+        }
     }
 
-    /**
-     * Shared extend logic — used by notification Extend button AND playback fade cancel.
-     */
     private suspend fun performExtend() {
         val settings = app.prefs.settings.first()
         val addMs = settings.extendMinutes * 60_000L
@@ -315,8 +398,7 @@ class TimerService : Service() {
         val remainingMin = ((remainingMs + 59_999L) / 60_000L).toInt().coerceAtLeast(1)
         acquireWakeLock(remainingMin)
 
-        // Restart tick loop if it was stopped
-        if (tickJob?.isActive != true) {
+        if (tickJob?.isActive != true && !isPaused) {
             startTickLoop()
         }
 
@@ -328,6 +410,7 @@ class TimerService : Service() {
 
     private fun endNow() {
         tickJob?.cancel()
+        autoResumeJob?.cancel()
         onTimerExpired()
     }
 
@@ -395,6 +478,7 @@ class TimerService : Service() {
     override fun onDestroy() {
         tickJob?.cancel()
         cooldownTickJob?.cancel()
+        autoResumeJob?.cancel()
         app.disconnector.endCooldown()
         releaseWakeLock()
         scope.cancel()

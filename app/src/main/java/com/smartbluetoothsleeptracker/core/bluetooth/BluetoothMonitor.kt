@@ -108,6 +108,9 @@ class BluetoothMonitor(
                 } catch (_: Exception) { false }
 
                 if (isConn) {
+                    com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(
+                        context, device.address, System.currentTimeMillis()
+                    )
                     val dbDevice = db.deviceDao().getDevice(device.address)
                     connected.add(
                         ConnectedDevice(

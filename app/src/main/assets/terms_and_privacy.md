@@ -6,11 +6,10 @@ Welcome to **SleepBT**, your privacy-focused Bluetooth sleep timer and ear healt
 
 ---
 
-### 1. 100% On-Device & Offline Privacy
-* **Zero Server Infrastructure:** SleepBT operates entirely offline on your device. We do not host, operate, or connect to any remote servers.
-* **No Telemetry or Tracking:** SleepBT contains **no analytics SDKs**, no crash-reporting tracking, no ad networks, and no telemetry services. 
-* **Local Data Storage:** All application data, timer presets, connected device history, and listening duration metrics are saved exclusively on your device using encrypted local SQLite database and DataStore files (`sleepbt_prefs` and `sleepbt.db`).
-* **No Cloud Backups:** Since no data is transmitted to external servers, deleting the app will permanently remove all locally saved configuration data.
+### 1. Privacy & Infrastructure Disclosures
+* **Firebase Services:** SleepBT uses Firebase Analytics and Firebase Authentication (anonymous) solely to count active installs and aggregate user activity. An anonymous device identifier (UID) along with install (`installedAt`) and last-active (`lastActiveAt`) timestamps are stored in Firebase Cloud Firestore.
+* **No Personal Information Transmitted:** No personal information, real identity, device name, paired hardware names, or Bluetooth audio metrics are ever sent to Firebase or external servers.
+* **Local Data Storage:** Application configuration, custom timer presets, connected device history, and listening duration metrics are saved exclusively on your device using local SQLite database and DataStore files (`sleepbt_prefs` and `sleepbt.db`).
 
 ---
 

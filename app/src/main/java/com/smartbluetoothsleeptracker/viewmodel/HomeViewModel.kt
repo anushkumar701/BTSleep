@@ -14,15 +14,24 @@ import com.smartbluetoothsleeptracker.data.prefs.AppSettings
 import com.smartbluetoothsleeptracker.service.TimerService
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 data class HomeUiState(
     val settings: AppSettings = AppSettings(),
     val connectedDevices: List<ConnectedDevice> = emptyList(),
     val btEnabled: Boolean = false,
     val isTimerRunning: Boolean = false,
+    val isPaused: Boolean = false,
+    val isDisconnectReady: Boolean = false,
     val remainingMs: Long = 0L,
     val cooldown: CooldownState = CooldownState(),
-    val selectedMinutes: Long = 30L
+    val selectedMinutes: Long = 30L,
+    val lastUsedPreset: Long = 0L,
+    // Smart suggestion
+    val suggestedMinutes: Int? = null,
+    val suggestionLabel: String = ""
 )
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -39,7 +48,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update { it.copy(remainingMs = remaining, isTimerRunning = remaining > 0) }
                 }
                 "com.sleepbt.TIMER_END" -> {
-                    _state.update { it.copy(isTimerRunning = false, remainingMs = 0L) }
+                    _state.update { it.copy(isTimerRunning = false, remainingMs = 0L, isPaused = false) }
                 }
             }
         }
@@ -56,18 +65,30 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // Observe settings
         viewModelScope.launch {
             app.prefs.settings.collect { settings ->
+                val paused = settings.timerPausedRemaining != null
                 _state.update { it.copy(
                     settings = settings,
                     selectedMinutes = settings.selectedMinutes,
-                    isTimerRunning = settings.timerEndWallClock != null && settings.timerEndWallClock > System.currentTimeMillis()
+                    lastUsedPreset = settings.lastUsedPreset,
+                    isTimerRunning = (settings.timerEndWallClock != null && settings.timerEndWallClock > System.currentTimeMillis()) || paused,
+                    isPaused = paused,
+                    remainingMs = settings.timerPausedRemaining ?: (settings.timerEndWallClock?.minus(System.currentTimeMillis())?.coerceAtLeast(0L) ?: 0L)
                 ) }
             }
         }
 
-        // Observe connected devices
+        // Observe connected devices & compute disconnect readiness
         viewModelScope.launch {
             app.btMonitor.connectedDevices.collect { devices ->
-                _state.update { it.copy(connectedDevices = devices) }
+                val addresses = devices.map { it.address }
+                var ready = false
+                if (addresses.isNotEmpty()) {
+                    val dbDevs = app.db.deviceDao().getAllNow().associateBy { it.address }
+                    ready = addresses.any { addr ->
+                        dbDevs[addr]?.workingDisconnectMethod != null
+                    }
+                }
+                _state.update { it.copy(connectedDevices = devices, isDisconnectReady = ready) }
             }
         }
 
@@ -84,6 +105,70 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(cooldown = cd) }
             }
         }
+
+        // Compute smart duration suggestion
+        viewModelScope.launch {
+            computeSmartSuggestion()
+        }
+    }
+
+    private suspend fun computeSmartSuggestion() {
+        try {
+            val sessions = app.db.sessionDao().recentSessionsNow()
+            if (sessions.size < 5) {
+                _state.update { it.copy(suggestedMinutes = null) }
+                return
+            }
+
+            val now = LocalDateTime.now()
+            val currentHour = now.hour
+
+            // Filter sessions within ±1 hour of current time-of-day
+            val relevantSessions = sessions.filter { session ->
+                val sessionHour = LocalDateTime.ofInstant(
+                    Instant.ofEpochMilli(session.startTime),
+                    ZoneId.systemDefault()
+                ).hour
+                val diff = kotlin.math.abs(sessionHour - currentHour)
+                diff <= 1 || diff >= 23 // handle midnight wrap
+            }
+
+            if (relevantSessions.size < 3) {
+                _state.update { it.copy(suggestedMinutes = null) }
+                return
+            }
+
+            // Find mode (most common duration)
+            val mode = relevantSessions
+                .groupBy { it.plannedDurationMin }
+                .maxByOrNull { it.value.size }
+                ?.key
+
+            if (mode != null && mode > 0) {
+                val timeLabel = when {
+                    currentHour < 6 -> "late night"
+                    currentHour < 12 -> "morning"
+                    currentHour < 17 -> "afternoon"
+                    currentHour < 21 -> "evening"
+                    else -> "night"
+                }
+                _state.update { it.copy(
+                    suggestedMinutes = mode,
+                    suggestionLabel = "Try ${formatSuggestionMinutes(mode)} — your usual pick around $timeLabel"
+                ) }
+            }
+        } catch (_: Exception) {
+            _state.update { it.copy(suggestedMinutes = null) }
+        }
+    }
+
+    private fun formatSuggestionMinutes(min: Int): String {
+        val h = min / 60; val m = min % 60
+        return when {
+            h > 0 && m > 0 -> "${h}h ${m}m"
+            h > 0 -> "${h}h"
+            else -> "${m}m"
+        }
     }
 
     fun setMinutesEphemeral(m: Long) {
@@ -94,11 +179,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.prefs.setSelectedMinutes(m) }
     }
 
+    fun saveLastUsedPreset(preset: Long) {
+        viewModelScope.launch { app.prefs.setLastUsedPreset(preset) }
+    }
+
+    fun applySuggestion(minutes: Int) {
+        val m = minutes.toLong()
+        _state.update { it.copy(selectedMinutes = m) }
+        viewModelScope.launch { app.prefs.setSelectedMinutes(m) }
+    }
+
     fun startTimer() {
         val s = _state.value
         val targets = s.connectedDevices
             .filter { it.isFavorite }
-            .ifEmpty { s.connectedDevices } // If no favorites, target all connected
+            .ifEmpty { s.connectedDevices }
             .map { it.address }
             .joinToString(",")
 
@@ -110,6 +205,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             targets
         )
         androidx.core.content.ContextCompat.startForegroundService(getApplication(), intent)
+    }
+
+    fun pauseTimer() {
+        val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
+            action = TimerService.ACTION_PAUSE
+        }
+        getApplication<Application>().startService(intent)
+    }
+
+    fun resumeTimer() {
+        val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
+            action = TimerService.ACTION_RESUME
+        }
+        getApplication<Application>().startService(intent)
     }
 
     fun cancelTimer() {

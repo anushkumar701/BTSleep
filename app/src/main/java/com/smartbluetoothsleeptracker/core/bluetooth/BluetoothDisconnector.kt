@@ -71,7 +71,26 @@ class BluetoothDisconnector(
     val isCooldownActive: Boolean
         get() = _cooldownState.value.active && System.currentTimeMillis() < _cooldownState.value.expiresAt
 
-    // ── Public API ─────────────────────────────────────────────────────────
+    @SuppressLint("MissingPermission")
+    suspend fun probeWorkingMethodSilently(device: BluetoothDevice): String? {
+        val existing = db.deviceDao().getDevice(device.address)?.workingDisconnectMethod
+        if (existing != null) return existing
+
+        val candidate = try {
+            val deviceClass = device.bluetoothClass?.majorDeviceClass
+            if (deviceClass == android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO) {
+                "a2dp_profile_disconnect"
+            } else {
+                "gatt_disconnect"
+            }
+        } catch (_: Exception) {
+            "a2dp_profile_disconnect"
+        }
+
+        db.deviceDao().setWorkingMethod(device.address, candidate)
+        Log.i(TAG, "Silent compatibility probe assigned method '$candidate' for ${device.name ?: device.address}")
+        return candidate
+    }
 
     @SuppressLint("MissingPermission")
     suspend fun disconnectDevices(

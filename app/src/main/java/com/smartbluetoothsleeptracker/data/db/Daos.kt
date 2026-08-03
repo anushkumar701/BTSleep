@@ -14,6 +14,9 @@ interface DeviceDao {
     @Query("SELECT * FROM devices WHERE is_favorite = 1")
     suspend fun getFavoriteDevicesNow(): List<DeviceEntity>
 
+    @Query("SELECT * FROM devices")
+    suspend fun getAllNow(): List<DeviceEntity>
+
     @Query("SELECT * FROM devices WHERE address = :address")
     suspend fun getDevice(address: String): DeviceEntity?
 
@@ -94,6 +97,9 @@ interface SessionDao {
 
     @Query("SELECT COUNT(*) FROM sessions WHERE date BETWEEN :from AND :to")
     suspend fun countInRange(from: String, to: String): Int
+
+    @Query("SELECT * FROM sessions WHERE planned_duration_min > 0 ORDER BY start_time DESC LIMIT 100")
+    suspend fun recentSessionsNow(): List<SessionEntity>
 }
 
 @Dao
@@ -110,7 +116,7 @@ interface DailyUsageDao {
     @Query("""
         SELECT * FROM daily_usage 
         WHERE date BETWEEN :from AND :to 
-        AND device_address IN (SELECT address FROM devices WHERE device_type IN ('EARBUDS','NECKBAND'))
+        AND device_address NOT IN (SELECT address FROM devices WHERE device_type IN ('PC','SMARTWATCH','HOME_THEATRE'))
         ORDER BY date ASC
     """)
     suspend fun earHealthUsageInRange(from: String, to: String): List<DailyUsageEntity>

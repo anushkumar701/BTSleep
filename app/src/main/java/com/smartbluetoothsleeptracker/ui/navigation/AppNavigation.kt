@@ -1,14 +1,18 @@
 package com.smartbluetoothsleeptracker.ui.navigation
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -48,42 +52,95 @@ fun AppNavigation(
     // Only show bottom bar on main tabs
     val showBottomBar = currentRoute in tabs.map { it.route }
 
+    val homeState by homeViewModel.state.collectAsStateWithLifecycle()
+
     Scaffold(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            if (showBottomBar) {
-                NavigationBar(
-                    containerColor = Surface1,
-                    contentColor = TextPrimary,
-                    tonalElevation = 0.dp
-                ) {
-                    tabs.forEach { tab ->
-                        val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = {
-                                navController.navigate(tab.route) {
+            Column {
+                if (showBottomBar && homeState.isTimerRunning && currentRoute != Tab.Home.route) {
+                    val remSec = (homeState.remainingMs / 1000L).coerceAtLeast(0L)
+                    val m = remSec / 60
+                    val s = remSec % 60
+                    val timeStr = String.format("%02d:%02d", m, s)
+
+                    Surface(
+                        color = Surface2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                navController.navigate(Tab.Home.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
                                 }
-                            },
-                            icon = {
-                                Icon(tab.icon, tab.label, modifier = Modifier.size(24.dp))
-                            },
-                            label = {
-                                Text(tab.label, style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = AccentBlue,
-                                selectedTextColor = AccentBlue,
-                                unselectedIconColor = TextTertiary,
-                                unselectedTextColor = TextTertiary,
-                                indicatorColor = AccentBlue.copy(alpha = 0.1f)
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(if (homeState.isPaused) StatusOrange else StatusGreen, androidx.compose.foundation.shape.CircleShape)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = if (homeState.isPaused) "Sleep Timer Paused" else "Sleep Timer Active",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                            }
+                            Text(
+                                text = timeStr,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Black,
+                                color = AccentBlue
                             )
-                        )
+                        }
+                    }
+                }
+
+                if (showBottomBar) {
+                    NavigationBar(
+                        containerColor = Surface1,
+                        contentColor = TextPrimary,
+                        tonalElevation = 0.dp
+                    ) {
+                        tabs.forEach { tab ->
+                            val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
+                            NavigationBarItem(
+                                selected = selected,
+                                onClick = {
+                                    navController.navigate(tab.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                icon = {
+                                    Icon(tab.icon, tab.label, modifier = Modifier.size(24.dp))
+                                },
+                                label = {
+                                    Text(tab.label, style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = AccentBlue,
+                                    selectedTextColor = AccentBlue,
+                                    unselectedIconColor = TextTertiary,
+                                    unselectedTextColor = TextTertiary,
+                                    indicatorColor = AccentBlue.copy(alpha = 0.1f)
+                                )
+                            )
+                        }
                     }
                 }
             }

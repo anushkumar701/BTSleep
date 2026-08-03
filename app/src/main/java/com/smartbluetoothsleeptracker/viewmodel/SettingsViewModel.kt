@@ -125,6 +125,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     // Notifications
     fun setSleepAlerts(on: Boolean)       = viewModelScope.launch { app.prefs.setSleepAlerts(on) }
     fun setWarningLeadMinutes(m: Int)     = viewModelScope.launch { app.prefs.setWarningLeadMinutes(m) }
+    fun setWeeklySummary(on: Boolean)     = viewModelScope.launch { app.prefs.setWeeklySummary(on) }
+    fun setWeeklySummaryHour(h: Int)      = viewModelScope.launch { app.prefs.setWeeklySummaryHour(h) }
+    fun setWeeklySummaryDay(d: Int)       = viewModelScope.launch { app.prefs.setWeeklySummaryDay(d) }
 
     // Service
     fun setForegroundService(on: Boolean) = viewModelScope.launch { app.prefs.setForegroundService(on) }
