@@ -54,6 +54,8 @@ fun AppNavigation(
 
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
 
+    val view = androidx.compose.ui.platform.LocalView.current
+
     Scaffold(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.background,
@@ -70,6 +72,10 @@ fun AppNavigation(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
+                                if (homeState.settings.hapticFeedbackEnabled) {
+                                    view.isHapticFeedbackEnabled = true
+                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                }
                                 navController.navigate(Tab.Home.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
@@ -119,6 +125,10 @@ fun AppNavigation(
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = {
+                                    if (homeState.settings.hapticFeedbackEnabled) {
+                                        view.isHapticFeedbackEnabled = true
+                                        view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                    }
                                     navController.navigate(tab.route) {
                                         popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                         launchSingleTop = true

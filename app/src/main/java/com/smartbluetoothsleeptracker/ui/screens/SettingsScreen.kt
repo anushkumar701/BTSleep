@@ -451,6 +451,7 @@ private fun SettingToggle(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val view = androidx.compose.ui.platform.LocalView.current
     Row(
         Modifier.fillMaxWidth()
             .background(Surface1, RoundedCornerShape(16.dp))
@@ -465,7 +466,11 @@ private fun SettingToggle(
         }
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = { newValue ->
+                view.isHapticFeedbackEnabled = true
+                view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                onCheckedChange(newValue)
+            },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = AccentBlue,
@@ -482,11 +487,16 @@ private fun SettingNavRow(
     title: String,
     onClick: () -> Unit
 ) {
+    val view = androidx.compose.ui.platform.LocalView.current
     Row(
         Modifier.fillMaxWidth()
             .background(Surface1, RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .clickable {
+                view.isHapticFeedbackEnabled = true
+                view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                onClick()
+            }
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

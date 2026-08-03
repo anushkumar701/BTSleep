@@ -77,6 +77,8 @@ fun UsageScreen(
         )
     }
 
+    val view = androidx.compose.ui.platform.LocalView.current
+
     Box(modifier = modifier.fillMaxSize()) {
         PullToRefreshBox(
             isRefreshing = state.isRefreshing,
@@ -115,7 +117,11 @@ fun UsageScreen(
                                     .weight(1f)
                                     .background(if (selected) AccentBlue else Color.Transparent, RoundedCornerShape(10.dp))
                                     .clip(RoundedCornerShape(10.dp))
-                                    .clickable { viewModel.setPeriod(period) }
+                                    .clickable {
+                                        view.isHapticFeedbackEnabled = true
+                                        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                        viewModel.setPeriod(period)
+                                    }
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
