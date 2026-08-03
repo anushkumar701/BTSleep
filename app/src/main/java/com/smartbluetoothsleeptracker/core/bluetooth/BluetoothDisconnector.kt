@@ -73,23 +73,9 @@ class BluetoothDisconnector(
 
     @SuppressLint("MissingPermission")
     suspend fun probeWorkingMethodSilently(device: BluetoothDevice): String? {
-        val existing = db.deviceDao().getDevice(device.address)?.workingDisconnectMethod
-        if (existing != null) return existing
-
-        val candidate = try {
-            val deviceClass = device.bluetoothClass?.majorDeviceClass
-            if (deviceClass == android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO) {
-                "a2dp_profile_disconnect"
-            } else {
-                "gatt_disconnect"
-            }
-        } catch (_: Exception) {
-            "a2dp_profile_disconnect"
-        }
-
-        db.deviceDao().setWorkingMethod(device.address, candidate)
-        Log.i(TAG, "Silent compatibility probe assigned method '$candidate' for ${device.name ?: device.address}")
-        return candidate
+        // Return the already-working cached method if present (populated by a real successful disconnect).
+        // Do NOT pre-assign a speculative method here — the method IDs must match allMethods() registry exactly.
+        return db.deviceDao().getDevice(device.address)?.workingDisconnectMethod
     }
 
     @SuppressLint("MissingPermission")
@@ -161,7 +147,7 @@ class BluetoothDisconnector(
                 // system_disable_dialog forces system dialog, wait for user. Assume success for logic flow.
                 actuallyDisconnected = true
             } else if (executionResult) {
-                delay(1500L) // Wait for profile connections to drop
+                delay(2500L) // Wait for profile connections to drop (MIUI/OneUI can lag up to 2s)
                 actuallyDisconnected = !isDeviceActuallyConnected(device)
                 if (!actuallyDisconnected) {
                     exceptionMsg = "Silent no-op (device still connected)"

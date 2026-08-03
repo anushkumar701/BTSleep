@@ -498,19 +498,9 @@ private fun RotaryDial(
     var lastSnapped by remember { mutableStateOf(minutes) }
     var centerPx by remember { mutableStateOf(Offset.Zero) }
     var sizePx by remember { mutableStateOf(0f) }
-    var isFineMode by remember { mutableStateOf(false) }
-    var showModeIndicator by remember { mutableStateOf(false) }
 
     LaunchedEffect(minutes) {
         lastSnapped = minutes
-    }
-
-    // Auto-hide mode indicator after drag ends
-    LaunchedEffect(showModeIndicator) {
-        if (showModeIndicator) {
-            kotlinx.coroutines.delay(1500)
-            showModeIndicator = false
-        }
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
@@ -569,10 +559,8 @@ private fun RotaryDial(
                                 val change = event.changes.firstOrNull() ?: break
 
                                 if (!change.pressed) {
-                                    // Finger lifted before drag
                                     if (dragStarted) {
                                         onMinutesChangeFinished(lastSnapped)
-                                        showModeIndicator = false
                                     }
                                     break
                                 }
@@ -582,18 +570,13 @@ private fun RotaryDial(
 
                                 if (!dragStarted && moved) {
                                     dragStarted = true
-                                    fineDetected = elapsed >= longPressThreshold
-                                    isFineMode = fineDetected
-                                    showModeIndicator = true
                                 } else if (!dragStarted && elapsed >= longPressThreshold && !moved) {
-                                    // Long press detected but no movement yet — haptic feedback
+                                    // Long press detected but no movement — give haptic feedback
                                     if (hapticEnabled) {
                                         view.isHapticFeedbackEnabled = true
                                         view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
                                     }
-                                    fineDetected = true
-                                    isFineMode = true
-                                    showModeIndicator = true
+                                    dragStarted = true
                                 }
 
                                 if (dragStarted) {
@@ -653,17 +636,6 @@ private fun RotaryDial(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text("minutes", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-
-                // Fine/Coarse mode indicator
-                if (showModeIndicator) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        if (isFineMode) "Fine · 1m steps" else "Coarse · 5m steps",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isFineMode) AccentCyan else AccentPurple,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
             }
         }
 

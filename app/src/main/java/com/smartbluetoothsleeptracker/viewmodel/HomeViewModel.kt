@@ -192,7 +192,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setMinutesEphemeral(m: Long) {
-        _state.update { it.copy(selectedMinutes = m.coerceIn(1, 480)) }
+        _state.update { it.copy(selectedMinutes = m.coerceIn(1, 120)) }
     }
 
     fun saveMinutes(m: Long) {
