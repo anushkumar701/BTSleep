@@ -52,9 +52,16 @@ class BluetoothReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "onReceive action: $action")
 
+        val device = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+        }
+
         when (action) {
             BluetoothDevice.ACTION_ACL_CONNECTED -> {
-                val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                if (device == null) return
                 val address = device.address
                 val now = System.currentTimeMillis()
 
@@ -100,7 +107,7 @@ class BluetoothReceiver : BroadcastReceiver() {
             }
 
             BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
-                val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                if (device == null) return
                 val address = device.address
                 val now = System.currentTimeMillis()
 
@@ -115,7 +122,7 @@ class BluetoothReceiver : BroadcastReceiver() {
 
                     // Record session and daily usage for connections lasting >= 1 minute
                     if (minutes >= 1) {
-                        val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                        val today = LocalDate.now().toString()
                         val pendingResult = goAsync()
                         CoroutineScope(Dispatchers.IO).launch {
                             try {

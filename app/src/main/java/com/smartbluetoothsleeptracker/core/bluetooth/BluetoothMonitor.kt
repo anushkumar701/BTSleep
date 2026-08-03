@@ -50,9 +50,16 @@ class BluetoothMonitor(
     private val receiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
         override fun onReceive(ctx: Context, intent: Intent) {
+            val device = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+            }
+
             when (intent.action) {
                 BluetoothDevice.ACTION_ACL_CONNECTED -> {
-                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                    if (device == null) return
                     Log.i(TAG, "ACL connected: ${device.name ?: device.address}")
                     scope.launch {
                         registerDevice(device)
@@ -61,7 +68,7 @@ class BluetoothMonitor(
                     onDeviceConnected?.invoke(device)
                 }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
-                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                    if (device == null) return
                     Log.i(TAG, "ACL disconnected: ${device.name ?: device.address}")
                     scope.launch { refreshConnectedDevices() }
                     onDeviceDisconnected?.invoke(device)
@@ -85,7 +92,12 @@ class BluetoothMonitor(
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
         }
-        context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        androidx.core.content.ContextCompat.registerReceiver(
+            context,
+            receiver,
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+        )
         _btEnabled.value = adapter?.isEnabled ?: false
         scope.launch { refreshConnectedDevices() }
     }

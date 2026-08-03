@@ -188,7 +188,12 @@ class PlaybackController(private val context: Context) {
             }
         }
         val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
-        context.registerReceiver(volumeReceiver, filter, Context.RECEIVER_EXPORTED)
+        androidx.core.content.ContextCompat.registerReceiver(
+            context,
+            volumeReceiver,
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+        )
         Log.i(TAG, "Registered VOLUME_CHANGED_ACTION receiver for fade window")
     }
 

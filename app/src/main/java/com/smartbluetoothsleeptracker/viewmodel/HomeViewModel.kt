@@ -60,7 +60,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             addAction("com.sleepbt.TICK")
             addAction("com.sleepbt.TIMER_END")
         }
-        application.registerReceiver(tickReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        androidx.core.content.ContextCompat.registerReceiver(
+            application,
+            tickReceiver,
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         // Observe settings
         viewModelScope.launch {
