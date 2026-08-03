@@ -12,8 +12,8 @@ import com.smartbluetoothsleeptracker.core.bluetooth.ConnectedDevice
 import com.smartbluetoothsleeptracker.core.bluetooth.CooldownState
 import com.smartbluetoothsleeptracker.data.prefs.AppSettings
 import com.smartbluetoothsleeptracker.service.TimerService
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -79,6 +79,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     isPaused = paused,
                     remainingMs = settings.timerPausedRemaining ?: (settings.timerEndWallClock?.minus(System.currentTimeMillis())?.coerceAtLeast(0L) ?: 0L)
                 ) }
+            }
+        }
+
+        // 1-second continuous ticker loop for smooth UI countdown and tab switching updates
+        viewModelScope.launch {
+            while (isActive) {
+                val current = _state.value
+                if (current.isTimerRunning && !current.isPaused) {
+                    val endClock = current.settings.timerEndWallClock
+                    if (endClock != null) {
+                        val rem = (endClock - System.currentTimeMillis()).coerceAtLeast(0L)
+                        _state.update { it.copy(remainingMs = rem, isTimerRunning = rem > 0) }
+                    }
+                }
+                delay(1000L)
             }
         }
 

@@ -215,6 +215,13 @@ class TimerService : Service() {
                     AppNotifications.timerNotification(this@TimerService, formatRemaining()).build()
                 )
 
+                // Send TICK broadcast for app UI
+                val tickIntent = Intent("com.sleepbt.TICK").apply {
+                    putExtra("remaining", remaining)
+                    setPackage(packageName)
+                }
+                sendBroadcast(tickIntent)
+
                 delay(1000)
             }
         }
