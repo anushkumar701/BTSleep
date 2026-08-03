@@ -21,6 +21,10 @@ android {
         vectorDrawables {
             useSupportLibrary true
         }
+        resourceConfigurations += ["en"]
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a"
+        }
 
         // Room schema export
         ksp {
@@ -39,6 +43,12 @@ android {
         }
         debug {
             debuggable true
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles(
+                    getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
+            )
         }
     }
 
