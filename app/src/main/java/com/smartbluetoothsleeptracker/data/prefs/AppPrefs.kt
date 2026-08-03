@@ -106,7 +106,7 @@ class AppPrefs(private val context: Context) {
     suspend fun setReconnectBlocker(on: Boolean)  = ds.edit { it[RECONNECT_BLOCKER] = on }
     suspend fun setCooldownSeconds(s: Int)        = ds.edit { it[COOLDOWN_SECONDS] = s.coerceIn(0, 120) }
     suspend fun setPlaybackStop(on: Boolean)      = ds.edit { it[PLAYBACK_STOP] = on }
-    suspend fun setFadeOutDuration(s: Int)        = ds.edit { it[FADE_DURATION] = s.coerceIn(3, 30) }
+    suspend fun setFadeOutDuration(s: Int)        = ds.edit { it[FADE_DURATION] = s.coerceIn(5, 1800) }
     suspend fun setScreenOff(on: Boolean)         = ds.edit { it[SCREEN_OFF] = on }
     suspend fun setHapticFeedback(on: Boolean)    = ds.edit { it[HAPTIC_FEEDBACK] = on }
     suspend fun setSleepAlerts(on: Boolean)       = ds.edit { it[SLEEP_ALERTS] = on }

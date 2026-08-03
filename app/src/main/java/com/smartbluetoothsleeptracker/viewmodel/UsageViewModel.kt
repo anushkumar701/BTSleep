@@ -119,13 +119,20 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val chartBars = when (period) {
             UsagePeriod.TODAY -> {
                 val currentHour = LocalDateTime.now().hour
-                (0..currentHour step 4).map { h ->
+                val currentBucket = (currentHour / 4) * 4
+                val todayUsageMins = usage.filter { it.date == fromStr }.sumOf { it.totalMinutes }
+                (0..20 step 4).map { h ->
                     val label = String.format("%02d:00", h)
-                    val hourMins = sessions.filter {
+                    var hourMins = sessions.filter {
                         val sTime = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(it.startTime), ZoneId.systemDefault())
                         sTime.toLocalDate() == today && sTime.hour in h until (h + 4)
-                    }.sumOf { it.actualDurationMin ?: 0 }
-                    ChartBarItem(label, hourMins, h == (currentHour / 4) * 4)
+                    }.sumOf { it.actualDurationMin ?: it.plannedDurationMin }
+
+                    val isCurrent = (h == currentBucket)
+                    if (isCurrent && hourMins == 0) {
+                        hourMins = maxOf(todayUsageMins, extraLiveMinutes)
+                    }
+                    ChartBarItem(label, hourMins, isCurrent)
                 }
             }
             UsagePeriod.WEEK -> {
@@ -133,25 +140,36 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                     val d = from.plusDays(offset.toLong())
                     val dStr = d.format(fmt)
                     val label = if (d == today) "Today" else d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
-                    val mins = usage.filter { it.date == dStr }.sumOf { it.totalMinutes }
+                    var mins = usage.filter { it.date == dStr }.sumOf { it.totalMinutes }
+                    if (d == today && mins == 0 && extraLiveMinutes > 0) {
+                        mins = extraLiveMinutes
+                    }
                     ChartBarItem(label, mins, d == today)
                 }
             }
             UsagePeriod.MONTH -> {
                 (0..3).map { w ->
                     val wStart = from.plusDays((w * 7).toLong())
-                    val wEnd = wStart.plusDays(6)
+                    val wEnd = if (w == 3) today else wStart.plusDays(6)
                     val label = "W${w + 1}"
-                    val mins = usage.filter {
-                        val d = LocalDate.parse(it.date, fmt)
-                        !d.isBefore(wStart) && !d.isAfter(wEnd)
+                    var mins = usage.filter {
+                        try {
+                            val d = LocalDate.parse(it.date, fmt)
+                            !d.isBefore(wStart) && !d.isAfter(wEnd)
+                        } catch (e: Exception) {
+                            false
+                        }
                     }.sumOf { it.totalMinutes }
-                    ChartBarItem(label, mins, today in wStart..wEnd)
+                    if (w == 3 && mins == 0 && extraLiveMinutes > 0) {
+                        mins = extraLiveMinutes
+                    }
+                    val isCurrent = !today.isBefore(wStart) && !today.isAfter(wEnd)
+                    ChartBarItem(label, mins, isCurrent)
                 }
             }
         }
 
-        val totalMins = stats.sumOf { it.totalMinutes } + extraLiveMinutes
+        val totalMins = stats.sumOf { it.totalMinutes }
         val totalSess = sessions.size
 
         _state.value = UsageUiState(

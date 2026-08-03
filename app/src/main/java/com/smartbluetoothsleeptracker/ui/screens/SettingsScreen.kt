@@ -120,7 +120,8 @@ fun SettingsScreen(
         }
         if (s.playbackStopEnabled) {
             item {
-                var textInput by remember(s.fadeOutDurationSeconds) { mutableStateOf(s.fadeOutDurationSeconds.toString()) }
+                val currentMin = maxOf(1, s.fadeOutDurationSeconds / 60)
+                var textInput by remember(currentMin) { mutableStateOf(currentMin.toString()) }
 
                 Column(
                     Modifier
@@ -136,15 +137,15 @@ fun SettingsScreen(
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Fade-Out Duration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("Ramp down volume (3–60 seconds)", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                            Text("Ramp down volume before disconnect (1–30 min)", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                         }
                         OutlinedTextField(
                             value = textInput,
                             onValueChange = { input ->
                                 textInput = input.filter { it.isDigit() }.take(2)
-                                val num = textInput.toIntOrNull()
-                                if (num != null) {
-                                    viewModel.setFadeOutDuration(num.coerceIn(3, 60))
+                                val numMin = textInput.toIntOrNull()
+                                if (numMin != null) {
+                                    viewModel.setFadeOutDuration(numMin.coerceIn(1, 30) * 60)
                                 }
                             },
                             modifier = Modifier.width(68.dp),
@@ -164,22 +165,8 @@ fun SettingsScreen(
                             )
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text("sec", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                        Text("min", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    Slider(
-                        value = s.fadeOutDurationSeconds.coerceIn(3, 60).toFloat(),
-                        onValueChange = {
-                            textInput = it.toInt().toString()
-                            viewModel.setFadeOutDuration(it.toInt())
-                        },
-                        valueRange = 3f..60f,
-                        steps = 56,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = SliderDefaults.colors(thumbColor = AccentBlue, activeTrackColor = AccentBlue)
-                    )
                 }
             }
             item {
