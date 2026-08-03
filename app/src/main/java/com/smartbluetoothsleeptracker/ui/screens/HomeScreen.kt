@@ -491,6 +491,7 @@ private fun RotaryDial(
     lastUsedPreset: Long = 0L,
     onPresetSelected: (Long) -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val fraction = ((minutes - MIN_MIN).toFloat() / (MAX_MIN - MIN_MIN).toFloat()).coerceIn(0f, 1f)
     val sweepAngle = fraction * DIAL_SWEEP
 
@@ -609,11 +610,8 @@ private fun RotaryDial(
                                         (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
                                     }
 
-                                    // Apply step snapping: fine=1min, coarse=5min
-                                    val step = if (fineDetected) 1L else 5L
-                                    val snapped = if (step > 1) {
-                                        ((rawSnapped + step / 2) / step * step).coerceIn(MIN_MIN, MAX_MIN)
-                                    } else rawSnapped
+                                    // Minute-by-minute step increments (1-min steps by default)
+                                    val snapped = rawSnapped.coerceIn(MIN_MIN, MAX_MIN)
 
                                     val isJump = kotlin.math.abs(snapped - lastSnapped) > (MAX_MIN - MIN_MIN) / 2
                                     val finalSnapped = if (isJump) {
@@ -625,12 +623,11 @@ private fun RotaryDial(
                                         lastSnapped = finalSnapped
                                         if (hapticEnabled) {
                                             view.isHapticFeedbackEnabled = true
-                                            // Lighter haptic for fine, stronger for coarse
-                                            val feedbackType = if (fineDetected)
-                                                HapticFeedbackConstants.CLOCK_TICK
-                                            else
-                                                HapticFeedbackConstants.KEYBOARD_TAP
-                                            view.performHapticFeedback(feedbackType, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                            view.performHapticFeedback(
+                                                HapticFeedbackConstants.KEYBOARD_TAP,
+                                                HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
+                                            )
+                                            com.smartbluetoothsleeptracker.core.haptics.HapticManager.vibrateTick(context)
                                         }
                                     }
                                     onMinutesChange(finalSnapped)

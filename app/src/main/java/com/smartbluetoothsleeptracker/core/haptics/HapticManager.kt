@@ -94,4 +94,27 @@ object HapticManager {
             vibrator.vibrate(150L)
         }
     }
+
+    /**
+     * Dial tick pulse: crisp tick for minute-by-minute rotary dial adjustments.
+     */
+    fun vibrateTick(context: Context) {
+        val vibrator = getVibrator(context) ?: return
+        if (!vibrator.hasVibrator()) return
+
+        val app = context.applicationContext as? SleepBTApp
+        if (app != null) {
+            val enabled = runBlocking { isHapticsEnabled(context) }
+            if (!enabled) return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(15L, 100))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(15L)
+        }
+    }
 }
