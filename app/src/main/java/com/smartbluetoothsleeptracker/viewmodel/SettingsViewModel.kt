@@ -66,19 +66,29 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val list = mutableListOf<PermissionStatus>()
 
         // 1. Notifications
+        val notifGranted = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
         list.add(PermissionStatus(
             name = "Notifications",
             description = "Timer alerts, warnings, and disconnect results",
-            granted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
+            granted = notifGranted,
             settingsAction = Settings.ACTION_APP_NOTIFICATION_SETTINGS,
             settingsUri = null
         ))
 
         // 2. Bluetooth
+        val btGranted = if (android.os.Build.VERSION.SDK_INT >= 31) {
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
         list.add(PermissionStatus(
             name = "Bluetooth",
             description = "Connect to and disconnect audio devices",
-            granted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED,
+            granted = btGranted,
             settingsAction = Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
             settingsUri = "package:${ctx.packageName}"
         ))

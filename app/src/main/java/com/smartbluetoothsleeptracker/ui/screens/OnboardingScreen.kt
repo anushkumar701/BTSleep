@@ -87,7 +87,13 @@ fun OnboardingScreen(
                     icon = Icons.Rounded.Notifications,
                     title = "Notifications",
                     description = "Get alerts when your timer is about to end, with options to extend or disconnect immediately.",
-                    onRequest = { notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                    onRequest = {
+                        if (android.os.Build.VERSION.SDK_INT >= 33) {
+                            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            step = OnboardingStep.BLUETOOTH
+                        }
+                    },
                     onSkip = { step = OnboardingStep.BLUETOOTH }
                 )
                 OnboardingStep.BLUETOOTH -> PermissionStep(
@@ -95,10 +101,14 @@ fun OnboardingScreen(
                     title = "Bluetooth Access",
                     description = "Required to detect connected audio devices and disconnect them when the timer expires.",
                     onRequest = {
-                        btLauncher.launch(arrayOf(
-                            Manifest.permission.BLUETOOTH_CONNECT,
-                            Manifest.permission.BLUETOOTH_SCAN
-                        ))
+                        if (android.os.Build.VERSION.SDK_INT >= 31) {
+                            btLauncher.launch(arrayOf(
+                                Manifest.permission.BLUETOOTH_CONNECT,
+                                Manifest.permission.BLUETOOTH_SCAN
+                            ))
+                        } else {
+                            step = OnboardingStep.BATTERY
+                        }
                     },
                     onSkip = { step = OnboardingStep.BATTERY }
                 )
