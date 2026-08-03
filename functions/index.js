@@ -60,6 +60,10 @@ exports.checkAppUninstalls = functions.pubsub
             status: "uninstalled",
             uninstalledAt: admin.firestore.FieldValue.serverTimestamp(),
           });
+          if (data.deviceId) {
+            console.log(`Removing uninstalled device document from devices collection: ${data.deviceId}`);
+            await db.collection("devices").doc(data.deviceId).delete();
+          }
           uninstalledCount++;
         } else {
           console.warn(`Error pinging token ${token}:`, error.message);
@@ -80,3 +84,46 @@ exports.checkAppUninstalls = functions.pubsub
 
     return null;
   });
+
+/**
+ * On-demand HTTP function to trigger uninstall check immediately.
+ */
+exports.triggerUninstallCheck = functions.https.onRequest(async (req, res) => {
+  const db = admin.firestore();
+  const messaging = admin.messaging();
+
+  const snapshot = await db.collection("fcm_tokens").where("status", "==", "active").get();
+  let activeCount = 0;
+  let uninstalledCount = 0;
+
+  for (const doc of snapshot.docs) {
+    const data = doc.data();
+    const token = data.token || doc.id;
+
+    try {
+      await messaging.send({ token: token, data: { ping: "uninstall_check" } }, true);
+      activeCount++;
+    } catch (error) {
+      if (
+        error.code === "messaging/registration-token-not-registered" ||
+        error.code === "messaging/invalid-registration-token"
+      ) {
+        await doc.ref.update({
+          status: "uninstalled",
+          uninstalledAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        if (data.deviceId) {
+          await db.collection("devices").doc(data.deviceId).delete();
+        }
+        uninstalledCount++;
+      }
+    }
+  }
+
+  res.json({
+    status: "success",
+    activeDevices: activeCount,
+    uninstalledDevicesRemoved: uninstalledCount
+  });
+});
+
