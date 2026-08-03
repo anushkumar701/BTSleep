@@ -29,7 +29,10 @@ object FirebaseManager {
             // 2. Silently register FCM token for uninstall tracking
             registerFcmTokenSilently(context)
 
-            // 3. Perform Anonymous Authentication
+            // 3. Immediately record device activity using persistent hardware/UUID device ID (independent of Auth success)
+            recordDeviceActivity(context, null)
+
+            // 4. Perform Anonymous Authentication concurrently
             val auth = FirebaseAuth.getInstance()
             val currentUser = auth.currentUser
             if (currentUser == null) {
@@ -49,6 +52,23 @@ object FirebaseManager {
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing Firebase tracking: ${e.message}")
         }
+    }
+
+    private fun getDeviceId(context: Context): String {
+        val prefs = context.getSharedPreferences("app_firebase_prefs", Context.MODE_PRIVATE)
+        var id = prefs.getString("unique_device_id", null)
+        if (id.isNullOrBlank()) {
+            val androidId = try {
+                android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.ANDROID_ID)
+            } catch (_: Exception) { null }
+            id = if (!androidId.isNullOrEmpty() && androidId != "9774d56d682e549c") {
+                androidId
+            } else {
+                java.util.UUID.randomUUID().toString()
+            }
+            prefs.edit().putString("unique_device_id", id).apply()
+        }
+        return id
     }
 
     /**
@@ -80,6 +100,7 @@ object FirebaseManager {
                 val tokenData = mapOf(
                     "token" to token,
                     "status" to "active",
+                    "deviceId" to getDeviceId(context),
                     "deviceName" to getFormattedDeviceName(),
                     "manufacturer" to android.os.Build.MANUFACTURER,
                     "model" to android.os.Build.MODEL,
@@ -108,10 +129,11 @@ object FirebaseManager {
 
     /**
      * Creates or updates the device document in Firestore collection 'devices'.
-     * Sets installedAt on first creation and updates lastActiveAt on every launch.
+     * Directly uses set() with merge option to prevent PERMISSION_DENIED or read-blocking.
      */
-    private fun recordDeviceActivity(context: Context, uid: String) {
+    private fun recordDeviceActivity(context: Context, authUid: String?) {
         try {
+            val deviceId = getDeviceId(context)
             val formattedName = getFormattedDeviceName()
             val manufacturer = android.os.Build.MANUFACTURER
             val model = android.os.Build.MODEL
@@ -124,31 +146,41 @@ object FirebaseManager {
             analytics.setUserProperty("android_version", osVersion)
 
             val db = FirebaseFirestore.getInstance()
-            val docRef = db.collection(COLLECTION_DEVICES).document(uid)
 
-            docRef.get().addOnSuccessListener { snapshot ->
-                val data = mutableMapOf<String, Any>(
-                    "uid" to uid,
-                    "deviceName" to formattedName,
-                    "manufacturer" to manufacturer,
-                    "model" to model,
-                    "androidVersion" to android.os.Build.VERSION.RELEASE,
-                    "sdkVersion" to android.os.Build.VERSION.SDK_INT,
-                    "osVersion" to osVersion,
-                    "lastActiveAt" to FieldValue.serverTimestamp()
-                )
-                if (!snapshot.exists()) {
-                    data["installedAt"] = FieldValue.serverTimestamp()
+            val data = mutableMapOf<String, Any>(
+                "deviceId" to deviceId,
+                "deviceName" to formattedName,
+                "manufacturer" to manufacturer,
+                "model" to model,
+                "androidVersion" to android.os.Build.VERSION.RELEASE,
+                "sdkVersion" to android.os.Build.VERSION.SDK_INT,
+                "osVersion" to osVersion,
+                "lastActiveAt" to FieldValue.serverTimestamp()
+            )
+            if (authUid != null) {
+                data["authUid"] = authUid
+            }
+
+            // Write to hardware device ID document
+            val deviceDocRef = db.collection(COLLECTION_DEVICES).document(deviceId)
+            deviceDocRef.set(data, SetOptions.merge())
+                .addOnSuccessListener {
+                    Log.i(TAG, "Firestore device document updated for $formattedName ($deviceId)")
                 }
-                docRef.set(data, SetOptions.merge())
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "Failed updating Firestore device doc for $deviceId: ${e.message}")
+                }
+
+            // If Auth UID is available, also update/create the doc under authUid
+            if (!authUid.isNullOrEmpty()) {
+                val authDocRef = db.collection(COLLECTION_DEVICES).document(authUid)
+                authDocRef.set(data, SetOptions.merge())
                     .addOnSuccessListener {
-                        Log.i(TAG, "Firestore device document updated for $formattedName ($uid)")
+                        Log.i(TAG, "Firestore device document updated for authUid $authUid")
                     }
                     .addOnFailureListener { e ->
-                        Log.e(TAG, "Failed updating Firestore device doc: ${e.message}")
+                        Log.e(TAG, "Failed updating Firestore device doc for authUid $authUid: ${e.message}")
                     }
-            }.addOnFailureListener { e ->
-                Log.e(TAG, "Failed reading Firestore device doc: ${e.message}")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error recording device activity in Firestore: ${e.message}")
