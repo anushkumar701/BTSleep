@@ -47,12 +47,20 @@ class BluetoothMonitor(
     var onDeviceConnected: ((BluetoothDevice) -> Unit)? = null
     var onDeviceDisconnected: ((BluetoothDevice) -> Unit)? = null
 
+    private val aclConnectedAddresses = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     private val receiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
         override fun onReceive(ctx: Context, intent: Intent) {
-            val device = if (android.os.Build.VERSION.SDK_INT >= 33) {
-                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-            } else {
+            val device = try {
+                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        ?: @Suppress("DEPRECATION") intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                }
+            } catch (_: Exception) {
                 @Suppress("DEPRECATION")
                 intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
             }
@@ -60,6 +68,7 @@ class BluetoothMonitor(
             when (intent.action) {
                 BluetoothDevice.ACTION_ACL_CONNECTED -> {
                     if (device == null) return
+                    aclConnectedAddresses.add(device.address)
                     Log.i(TAG, "ACL connected: ${device.name ?: device.address}")
                     scope.launch {
                         registerDevice(device)
@@ -69,6 +78,7 @@ class BluetoothMonitor(
                 }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
                     if (device == null) return
+                    aclConnectedAddresses.remove(device.address)
                     Log.i(TAG, "ACL disconnected: ${device.name ?: device.address}")
                     scope.launch { refreshConnectedDevices() }
                     onDeviceDisconnected?.invoke(device)
@@ -77,6 +87,7 @@ class BluetoothMonitor(
                     val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                     _btEnabled.value = state == BluetoothAdapter.STATE_ON
                     if (state == BluetoothAdapter.STATE_OFF) {
+                        aclConnectedAddresses.clear()
                         _connectedDevices.value = emptyList()
                     } else if (state == BluetoothAdapter.STATE_ON) {
                         scope.launch { refreshConnectedDevices() }
@@ -114,10 +125,26 @@ class BluetoothMonitor(
         val connected = mutableListOf<ConnectedDevice>()
 
         runCatching {
-            ad.bondedDevices?.forEach { device ->
-                val isConn = try {
-                    device.javaClass.getMethod("isConnected").invoke(device) as? Boolean ?: false
+            val bonded = ad.bondedDevices ?: emptySet()
+            val a2dpConn = try { ad.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED } catch (_: Exception) { false }
+            val hfpConn = try { ad.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED } catch (_: Exception) { false }
+            val leConn = try {
+                if (android.os.Build.VERSION.SDK_INT >= 33) ad.getProfileConnectionState(22) == BluetoothProfile.STATE_CONNECTED else false
+            } catch (_: Exception) { false }
+
+            val anyAudioProfileConn = a2dpConn || hfpConn || leConn
+
+            bonded.forEach { device ->
+                val reflectConn = try {
+                    val method = device.javaClass.getMethod("isConnected")
+                    method.isAccessible = true
+                    method.invoke(device) as? Boolean ?: false
                 } catch (_: Exception) { false }
+
+                val aclConn = aclConnectedAddresses.contains(device.address)
+
+                // On Android 13+, non-SDK reflection may fail. Combine ACL state, reflection, and active profile state.
+                val isConn = aclConn || reflectConn || (anyAudioProfileConn && (device.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO))
 
                 if (isConn) {
                     com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(

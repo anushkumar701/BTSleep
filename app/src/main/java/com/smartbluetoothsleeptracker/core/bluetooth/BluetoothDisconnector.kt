@@ -366,17 +366,15 @@ class BluetoothDisconnector(
 
     @SuppressLint("MissingPermission")
     private suspend fun isDeviceActuallyConnected(device: BluetoothDevice): Boolean {
-        // Reflection check
         val reflectConnected = try {
             val method = device.javaClass.getDeclaredMethod("isConnected")
             method.isAccessible = true
             method.invoke(device) as? Boolean ?: false
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
         if (reflectConnected) return true
 
-        // Deep verification check via profile proxies
         return isDeviceConnectedViaProfiles(device)
     }
 
@@ -384,7 +382,10 @@ class BluetoothDisconnector(
     private suspend fun isDeviceConnectedViaProfiles(device: BluetoothDevice): Boolean {
         val a2dpConnected = isDeviceConnectedViaProfileType(BluetoothProfile.A2DP, device)
         val hfpConnected = isDeviceConnectedViaProfileType(BluetoothProfile.HEADSET, device)
-        return a2dpConnected || hfpConnected
+        val leAudioConnected = if (Build.VERSION.SDK_INT >= 33) {
+            isDeviceConnectedViaProfileType(22 /* BluetoothProfile.LE_AUDIO */, device)
+        } else false
+        return a2dpConnected || hfpConnected || leAudioConnected
     }
 
     @SuppressLint("MissingPermission")
@@ -450,14 +451,23 @@ class BluetoothDisconnector(
         val result = mutableListOf<BluetoothDevice>()
 
         runCatching {
+            val a2dpConn = try { ad.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED } catch (_: Exception) { false }
+            val hfpConn = try { ad.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED } catch (_: Exception) { false }
+            val leConn = try {
+                if (Build.VERSION.SDK_INT >= 33) ad.getProfileConnectionState(22) == BluetoothProfile.STATE_CONNECTED else false
+            } catch (_: Exception) { false }
+
+            val anyAudioProfileConn = a2dpConn || hfpConn || leConn
+
             ad.bondedDevices?.forEach { device ->
                 val isConn = try {
                     val method = device.javaClass.getDeclaredMethod("isConnected")
                     method.isAccessible = true
                     method.invoke(device) as? Boolean ?: false
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     false
-                }
+                } || (anyAudioProfileConn && (device.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO))
+
                 if (isConn) result.add(device)
             }
         }
