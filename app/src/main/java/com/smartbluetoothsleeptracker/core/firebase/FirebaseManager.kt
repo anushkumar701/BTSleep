@@ -72,7 +72,7 @@ object FirebaseManager {
     }
 
     /**
-     * Silently retrieves FCM registration token and logs it to Analytics & Firestore fcm_tokens collection.
+     * Silently retrieves FCM registration token and saves it to Firestore for uninstall tracking.
      */
     private fun registerFcmTokenSilently(context: Context) {
         try {
@@ -82,33 +82,20 @@ object FirebaseManager {
                     return@addOnCompleteListener
                 }
                 val token = task.result ?: return@addOnCompleteListener
-                Log.i(TAG, "FCM Token retrieved silently: $token")
+                Log.i(TAG, "FCM Token retrieved silently")
 
-                // Set as user property in Analytics
-                val analytics = FirebaseAnalytics.getInstance(context)
-                analytics.setUserProperty("fcm_token", token)
-
-                // Log custom event fcm_token_registered
-                val bundle = Bundle().apply {
-                    putString("fcm_token", token)
-                }
-                analytics.logEvent("fcm_token_registered", bundle)
-
-                // Save to Firestore fcm_tokens collection for server-side uninstall tracking
+                // Save to Firestore fcm_tokens — only what's needed for uninstall tracking
                 val db = FirebaseFirestore.getInstance()
-                val tokenDoc = db.collection(COLLECTION_FCM_TOKENS).document(token)
                 val tokenData = mapOf(
                     "token" to token,
                     "status" to "active",
                     "deviceId" to getDeviceId(context),
                     "deviceName" to getFormattedDeviceName(),
-                    "manufacturer" to android.os.Build.MANUFACTURER,
-                    "model" to android.os.Build.MODEL,
-                    "androidVersion" to android.os.Build.VERSION.RELEASE,
                     "lastSeenAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
-                tokenDoc.set(tokenData, SetOptions.merge())
+                db.collection(COLLECTION_FCM_TOKENS).document(token)
+                    .set(tokenData, SetOptions.merge())
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in registerFcmTokenSilently: ${e.message}")
@@ -128,62 +115,48 @@ object FirebaseManager {
     }
 
     /**
-     * Creates or updates the device document in Firestore collection 'devices'.
-     * Directly uses set() with merge option to prevent PERMISSION_DENIED or read-blocking.
+     * Creates or updates the device document in Firestore — stores only device name.
      */
     private fun recordDeviceActivity(context: Context, authUid: String?) {
         try {
             val deviceId = getDeviceId(context)
-            val formattedName = getFormattedDeviceName()
-            val manufacturer = android.os.Build.MANUFACTURER
-            val model = android.os.Build.MODEL
-            val osVersion = "Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})"
+            val deviceName = getFormattedDeviceName()
 
-            // Log properties in Firebase Analytics for easy filtering
+            // Only log device_name to Analytics — no hardware fingerprinting
             val analytics = FirebaseAnalytics.getInstance(context)
-            analytics.setUserProperty("device_name", formattedName)
-            analytics.setUserProperty("device_model", model)
-            analytics.setUserProperty("android_version", osVersion)
+            analytics.setUserProperty("device_name", deviceName)
 
             val db = FirebaseFirestore.getInstance()
 
             val data = mutableMapOf<String, Any>(
                 "deviceId" to deviceId,
-                "deviceName" to formattedName,
-                "manufacturer" to manufacturer,
-                "model" to model,
-                "androidVersion" to android.os.Build.VERSION.RELEASE,
-                "sdkVersion" to android.os.Build.VERSION.SDK_INT,
-                "osVersion" to osVersion,
+                "deviceName" to deviceName,
                 "lastActiveAt" to FieldValue.serverTimestamp()
             )
             if (authUid != null) {
                 data["authUid"] = authUid
             }
 
-            // Write to hardware device ID document
+            // Write to device ID document
             val deviceDocRef = db.collection(COLLECTION_DEVICES).document(deviceId)
             deviceDocRef.set(data, SetOptions.merge())
                 .addOnSuccessListener {
-                    Log.i(TAG, "Firestore device document updated for $formattedName ($deviceId)")
+                    Log.i(TAG, "Firestore device document updated for $deviceName ($deviceId)")
                 }
                 .addOnFailureListener { e ->
-                    Log.e(TAG, "Failed updating Firestore device doc for $deviceId: ${e.message}")
+                    Log.e(TAG, "Failed updating Firestore device doc: ${e.message}")
                 }
 
-            // If Auth UID is available, also update/create the doc under authUid
+            // If Auth UID available, also mirror to authUid doc
             if (!authUid.isNullOrEmpty()) {
-                val authDocRef = db.collection(COLLECTION_DEVICES).document(authUid)
-                authDocRef.set(data, SetOptions.merge())
-                    .addOnSuccessListener {
-                        Log.i(TAG, "Firestore device document updated for authUid $authUid")
-                    }
+                db.collection(COLLECTION_DEVICES).document(authUid)
+                    .set(data, SetOptions.merge())
                     .addOnFailureListener { e ->
-                        Log.e(TAG, "Failed updating Firestore device doc for authUid $authUid: ${e.message}")
+                        Log.e(TAG, "Failed updating auth doc: ${e.message}")
                     }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error recording device activity in Firestore: ${e.message}")
+            Log.e(TAG, "Error recording device activity: ${e.message}")
         }
     }
 
