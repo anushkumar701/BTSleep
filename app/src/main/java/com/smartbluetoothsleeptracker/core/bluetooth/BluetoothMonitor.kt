@@ -126,11 +126,6 @@ class BluetoothMonitor(
 
         runCatching {
             val bonded = ad.bondedDevices ?: emptySet()
-            val a2dpConn = try { ad.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED } catch (_: Exception) { false }
-            val hfpConn = try { ad.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED } catch (_: Exception) { false }
-            val leConn = try {
-                if (android.os.Build.VERSION.SDK_INT >= 33) ad.getProfileConnectionState(22) == BluetoothProfile.STATE_CONNECTED else false
-            } catch (_: Exception) { false }
 
             bonded.forEach { device ->
                 val reflectConn = try {

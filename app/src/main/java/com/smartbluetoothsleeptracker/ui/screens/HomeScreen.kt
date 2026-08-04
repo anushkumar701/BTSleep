@@ -99,7 +99,7 @@ fun HomeScreen(
             Spacer(Modifier.height(16.dp))
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(16.dp))
 
         if (state.isTimerRunning) {
             val totalDurationMs = (state.settings.timerPlannedMinutes + state.settings.timerExtendedMinutes) * 60_000L
@@ -141,7 +141,7 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.weight(1f))
 
         // ── Action Buttons ─────────────────────────────────────────────
         if (state.isTimerRunning) {
