@@ -192,6 +192,8 @@ class TimerService : Service() {
                     // Cancel the timer notification immediately — never show 0:00
                     val nm = getSystemService(android.app.NotificationManager::class.java)
                     nm.cancel(AppNotifications.NOTIF_TIMER)
+                    @Suppress("DEPRECATION")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                     onTimerExpired()
                     return@launch
                 }
@@ -257,6 +259,9 @@ class TimerService : Service() {
 
         scope.launch {
             try {
+                val nm = getSystemService(android.app.NotificationManager::class.java)
+                nm.cancel(AppNotifications.NOTIF_TIMER)
+
                 val settings = app.prefs.settings.first()
 
                 // ── STEP 1: Playback Stop (volume fade) ────────────────────
@@ -348,8 +353,8 @@ class TimerService : Service() {
                 }
 
                 if (settings.sleepAlertsEnabled) {
-                    val nm = getSystemService(android.app.NotificationManager::class.java)
-                    nm.notify(
+                    val notifMgr = getSystemService(android.app.NotificationManager::class.java)
+                    notifMgr.notify(
                         AppNotifications.NOTIF_DISCONNECT_RESULT,
                         AppNotifications.disconnectResultNotification(this@TimerService, result.success, devName).build()
                     )

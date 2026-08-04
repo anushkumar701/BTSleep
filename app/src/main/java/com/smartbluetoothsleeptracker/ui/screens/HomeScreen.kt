@@ -1,6 +1,7 @@
 package com.smartbluetoothsleeptracker.ui.screens
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,6 +69,29 @@ fun HomeScreen(
         }
     }
 
+    var showCooldownPopup by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.cooldown.active) {
+        if (state.cooldown.active) {
+            showCooldownPopup = true
+        } else {
+            showCooldownPopup = false
+        }
+    }
+
+    if (showCooldownPopup && state.cooldown.active) {
+        CooldownPopUpDialog(
+            expiresAt = state.cooldown.expiresAt,
+            onAllowReconnect = {
+                showCooldownPopup = false
+                viewModel.allowReconnect()
+            },
+            onDismiss = {
+                showCooldownPopup = false
+            }
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -94,7 +118,8 @@ fun HomeScreen(
         if (state.cooldown.active) {
             CooldownBanner(
                 expiresAt = state.cooldown.expiresAt,
-                onAllowReconnect = { viewModel.allowReconnect() }
+                onAllowReconnect = { viewModel.allowReconnect() },
+                onOpenPopup = { showCooldownPopup = true }
             )
             Spacer(Modifier.height(16.dp))
         }
@@ -374,10 +399,14 @@ private fun ConnectionStatusBar(
     }
 }
 
-// ── Cooldown Banner ────────────────────────────────────────────────────
+// ── Cooldown Banner & Pop-up ───────────────────────────────────────────
 
 @Composable
-private fun CooldownBanner(expiresAt: Long, onAllowReconnect: () -> Unit) {
+private fun CooldownBanner(
+    expiresAt: Long,
+    onAllowReconnect: () -> Unit,
+    onOpenPopup: () -> Unit
+) {
     val remainingSeconds by produceState(
         initialValue = ((expiresAt - System.currentTimeMillis()).coerceAtLeast(0) + 999) / 1000,
         key1 = expiresAt
@@ -393,6 +422,8 @@ private fun CooldownBanner(expiresAt: Long, onAllowReconnect: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(StatusOrange.copy(0.1f), RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onOpenPopup() }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -401,7 +432,7 @@ private fun CooldownBanner(expiresAt: Long, onAllowReconnect: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text("Reconnect blocked", style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold, color = StatusOrange)
-            Text("${remainingSeconds}s remaining", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+            Text("${remainingSeconds}s remaining — tap for details", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
         }
         Box(
             modifier = Modifier
@@ -412,6 +443,135 @@ private fun CooldownBanner(expiresAt: Long, onAllowReconnect: () -> Unit) {
         ) {
             Text("Allow now", style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold, color = StatusGreen)
+        }
+    }
+}
+
+@Composable
+private fun CooldownPopUpDialog(
+    expiresAt: Long,
+    onAllowReconnect: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val initialSec = ((expiresAt - System.currentTimeMillis()).coerceAtLeast(0) + 999) / 1000
+    val remainingSeconds by produceState(
+        initialValue = initialSec,
+        key1 = expiresAt
+    ) {
+        while (System.currentTimeMillis() < expiresAt) {
+            value = ((expiresAt - System.currentTimeMillis()).coerceAtLeast(0) + 999) / 1000
+            kotlinx.coroutines.delay(200)
+        }
+        value = 0L
+        onDismiss()
+    }
+
+    val maxCooldownSec = 60f
+    val progress = (remainingSeconds.toFloat() / maxCooldownSec).coerceIn(0f, 1f)
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Surface1),
+            border = BorderStroke(1.dp, StatusOrange.copy(alpha = 0.4f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Glowing Shield Badge
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(StatusOrange.copy(0.15f), CircleShape)
+                        .border(2.dp, StatusOrange.copy(0.4f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.Shield,
+                        contentDescription = null,
+                        tint = StatusOrange,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                Text(
+                    text = "Reconnect Protection Active",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    text = "SleepBT is actively preventing auto-reconnection to ensure undisturbed sleep.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                // Running timer ring inside pop-up
+                Box(
+                    modifier = Modifier.size(110.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxSize(),
+                        color = StatusOrange,
+                        trackColor = StatusOrange.copy(alpha = 0.15f),
+                        strokeWidth = 6.dp
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "${remainingSeconds}s",
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = StatusOrange
+                        )
+                        Text(
+                            text = "remaining",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                // Action Buttons
+                Button(
+                    onClick = onAllowReconnect,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusGreen)
+                ) {
+                    Icon(Icons.Rounded.Check, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Allow Reconnect Now", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Keep Blocked", color = TextSecondary, fontSize = 13.sp)
+                }
+            }
         }
     }
 }
