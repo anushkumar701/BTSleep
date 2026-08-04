@@ -80,7 +80,12 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val fromStr = from.format(fmt)
         val toStr = to.format(fmt)
 
-        val sessions = app.db.sessionDao().sessionsInRangeNow(fromStr, toStr).toMutableList()
+        app.db.sessionDao().deleteEmptySessions()
+        val rawSessions = app.db.sessionDao().sessionsInRangeNow(fromStr, toStr)
+        val sessions = rawSessions
+            .filter { (it.actualDurationMin ?: 0) > 0 || it.plannedDurationMin > 0 }
+            .distinctBy { "${it.startTime / 10000}_${it.deviceAddress}" }
+            .toMutableList()
         val usage = app.db.dailyUsageDao().usageInRangeNow(fromStr, toStr).toMutableList()
 
         // Check active ongoing connections to include live duration

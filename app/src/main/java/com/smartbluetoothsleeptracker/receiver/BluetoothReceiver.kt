@@ -126,12 +126,19 @@ class BluetoothReceiver : BroadcastReceiver() {
                     val durationMs = now - startTime
                     val minutes = (durationMs / 60_000L).toInt()
 
-                    // Record session and daily usage for connections lasting >= 1 minute
+                    // Record session and daily usage for background connections lasting >= 1 minute
                     if (minutes >= 1) {
                         val today = LocalDate.now().toString()
                         val pendingResult = goAsync()
                         CoroutineScope(Dispatchers.IO).launch {
                             try {
+                                // Skip if TimerService created a session for this device recently (last 3 minutes)
+                                val recentSession = app.db.sessionDao().getRecentSessionForDevice(address, now - 180_000L)
+                                if (recentSession != null) {
+                                    Log.i(TAG, "Skipping background session insertion — already recorded by TimerService")
+                                    return@launch
+                                }
+
                                 app.db.sessionDao().insert(
                                     SessionEntity(
                                         deviceAddress = address,

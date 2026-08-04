@@ -100,6 +100,12 @@ interface SessionDao {
 
     @Query("SELECT * FROM sessions WHERE planned_duration_min > 0 ORDER BY start_time DESC LIMIT 100")
     suspend fun recentSessionsNow(): List<SessionEntity>
+
+    @Query("SELECT * FROM sessions WHERE device_address = :address AND start_time >= :minStartTime LIMIT 1")
+    suspend fun getRecentSessionForDevice(address: String, minStartTime: Long): SessionEntity?
+
+    @Query("DELETE FROM sessions WHERE actual_duration_min <= 0 AND planned_duration_min <= 0")
+    suspend fun deleteEmptySessions()
 }
 
 @Dao

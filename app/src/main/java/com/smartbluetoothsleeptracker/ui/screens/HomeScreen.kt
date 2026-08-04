@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import android.view.HapticFeedbackConstants
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
@@ -140,7 +141,7 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(24.dp))
 
         // ── Action Buttons ─────────────────────────────────────────────
         if (state.isTimerRunning) {
@@ -248,7 +249,10 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(60.dp)
-                        .then(if (isEnabled) Modifier.scale(breatheScale) else Modifier),
+                        .graphicsLayer {
+                            scaleX = if (isEnabled) breatheScale else 1f
+                            scaleY = if (isEnabled) breatheScale else 1f
+                        },
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = AccentBlue,

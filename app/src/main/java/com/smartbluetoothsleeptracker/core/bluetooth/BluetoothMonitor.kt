@@ -132,8 +132,6 @@ class BluetoothMonitor(
                 if (android.os.Build.VERSION.SDK_INT >= 33) ad.getProfileConnectionState(22) == BluetoothProfile.STATE_CONNECTED else false
             } catch (_: Exception) { false }
 
-            val anyAudioProfileConn = a2dpConn || hfpConn || leConn
-
             bonded.forEach { device ->
                 val reflectConn = try {
                     val method = device.javaClass.getMethod("isConnected")
@@ -143,8 +141,8 @@ class BluetoothMonitor(
 
                 val aclConn = aclConnectedAddresses.contains(device.address)
 
-                // On Android 13+, non-SDK reflection may fail. Combine ACL state, reflection, and active profile state.
-                val isConn = aclConn || reflectConn || (anyAudioProfileConn && (device.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO))
+                // A device is connected if its ACL link is connected or if its reflects as connected.
+                val isConn = aclConn || reflectConn
 
                 if (isConn) {
                     com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(
@@ -164,7 +162,7 @@ class BluetoothMonitor(
             }
         }
 
-        _connectedDevices.value = connected
+        _connectedDevices.value = connected.distinctBy { it.address }
     }
 
     @SuppressLint("MissingPermission")
