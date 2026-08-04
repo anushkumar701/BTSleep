@@ -260,7 +260,7 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.weight(0.6f))
+        Spacer(Modifier.height(16.dp))
 
         // ── Action Buttons ─────────────────────────────────────────────
         if (state.isTimerRunning) {
@@ -400,7 +400,7 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(32.dp))
     }
 }
 
