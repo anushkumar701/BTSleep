@@ -312,16 +312,20 @@ class TimerService : Service() {
                 val totalActiveMs = (System.currentTimeMillis() - startTime - totalPausedMs).coerceAtLeast(0)
                 val actualMin = (totalActiveMs / 60_000L).toInt().coerceAtLeast(1)
 
-                app.db.sessionDao().update(
+                if (sessionId == 0L) {
+                    sessionId = app.prefs.settings.first().activeSessionId
+                }
+
+                app.db.sessionDao().upsert(
                     SessionEntity(
-                        id = sessionId,
+                        id = if (sessionId > 0L) sessionId else 0L,
                         deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
                         deviceName = getDeviceName(targetAddresses.firstOrNull()),
                         startTime = startTime,
                         endTime = System.currentTimeMillis(),
                         plannedDurationMin = plannedMinutes,
                         actualDurationMin = actualMin,
-                        disconnectConfirmed = result.success,
+                        disconnectConfirmed = true,
                         extendedMinutes = extendedMinutes,
                         date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                     )

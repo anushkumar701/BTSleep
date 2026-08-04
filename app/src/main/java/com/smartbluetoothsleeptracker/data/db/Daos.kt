@@ -83,6 +83,9 @@ interface SessionDao {
     @Update
     suspend fun update(session: SessionEntity)
 
+    @Upsert
+    suspend fun upsert(session: SessionEntity): Long
+
     @Query("DELETE FROM sessions WHERE id = :id")
     suspend fun deleteById(id: Long)
 

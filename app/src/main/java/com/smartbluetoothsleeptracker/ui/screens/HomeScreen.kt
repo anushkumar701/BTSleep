@@ -114,24 +114,132 @@ fun HomeScreen(
             isDisconnectReady = state.isDisconnectReady
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
-        // ── Cooldown Banner ────────────────────────────────────────────
         if (state.cooldown.active) {
-            CooldownBanner(
+            // ── MAIN RECONNECT BLOCKER VIEW ON HOME SCREEN WHEN TIMER ENDS ──
+            CooldownMainCard(
                 expiresAt = state.cooldown.expiresAt,
-                onAllowReconnect = { viewModel.allowReconnect() },
-                onOpenPopup = { showCooldownPopup = true }
+                onAllowReconnect = { viewModel.allowReconnect() }
             )
-            Spacer(Modifier.height(16.dp))
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        if (state.isTimerRunning) {
+        } else if (state.isTimerRunning) {
+            // ── ACTIVE TIMER VIEW ──
             val totalDurationMs = (state.settings.timerPlannedMinutes + state.settings.timerExtendedMinutes) * 60_000L
             CountdownDisplay(remainingMs = state.remainingMs, totalDurationMs = totalDurationMs)
+
+            Spacer(Modifier.height(16.dp))
+
+            // Action Buttons (Cancel, Pause, Extend) IMMEDIATELY below timer!
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        doHaptic()
+                        viewModel.cancelTimer()
+                    },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
+                    border = ButtonDefaults.outlinedButtonBorder(enabled = true)
+                ) {
+                    Icon(Icons.Rounded.Close, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                Button(
+                    onClick = {
+                        doHaptic()
+                        if (state.isPaused) viewModel.resumeTimer() else viewModel.pauseTimer()
+                    },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (state.isPaused) StatusOrange else Surface3)
+                ) {
+                    Icon(
+                        if (state.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                        null,
+                        Modifier.size(18.dp),
+                        tint = if (state.isPaused) Color.White else TextPrimary
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (state.isPaused) "Resume" else "Pause",
+                        fontWeight = FontWeight.Bold,
+                        color = if (state.isPaused) Color.White else TextPrimary,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        doHaptic()
+                        viewModel.extendTimer()
+                    },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentPurple)
+                ) {
+                    Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Extend", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Active Sleep Protection Details Card
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Surface2),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(StatusGreen, CircleShape)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Sleep Protection Running",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = StatusGreen
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Bluetooth, null, tint = AccentBlue, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                state.connectedDevices.firstOrNull()?.name ?: "Bluetooth Device",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                        }
+
+                        Text(
+                            if (state.settings.playbackStopEnabled) "${state.settings.fadeOutDurationSeconds}s fade" else "No fade",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+            }
         } else {
+            // ── IDLE DIAL VIEW ──
             RotaryDial(
                 minutes = state.selectedMinutes,
                 onMinutesChange = { viewModel.setMinutesEphemeral(it) },
@@ -139,39 +247,37 @@ fun HomeScreen(
                 view = view,
                 hapticEnabled = hapticEnabled
             )
-        }
 
-        // ── Smart Duration Suggestion ──────────────────────────────────
-        if (!state.isTimerRunning && state.suggestedMinutes != null) {
-            Spacer(Modifier.height(12.dp))
-            Box(
-                modifier = Modifier
-                    .background(AccentPurple.copy(0.1f), RoundedCornerShape(12.dp))
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { viewModel.applySuggestion(state.suggestedMinutes!!) }
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.AutoAwesome, null,
-                        tint = AccentPurple,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        state.suggestionLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AccentPurple,
-                        fontWeight = FontWeight.SemiBold
-                    )
+            // ── Smart Duration Suggestion ──────────────────────────────────
+            if (state.suggestedMinutes != null) {
+                Spacer(Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .background(AccentPurple.copy(0.1f), RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { viewModel.applySuggestion(state.suggestedMinutes!!) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Rounded.AutoAwesome, null,
+                            tint = AccentPurple,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            state.suggestionLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentPurple,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
-        }
 
-        Spacer(Modifier.weight(0.4f))
+            Spacer(Modifier.weight(0.4f))
 
-        // ── Sleep Protection Overview Card ──────────────────────────────
-        if (!state.isTimerRunning) {
+            // ── Sleep Protection Overview Card ──────────────────────────────
             Card(
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = Surface2),
@@ -258,70 +364,9 @@ fun HomeScreen(
                     }
                 }
             }
-        }
 
-        Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
-        // ── Action Buttons ─────────────────────────────────────────────
-        if (state.isTimerRunning) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        doHaptic()
-                        viewModel.cancelTimer()
-                    },
-                    modifier = Modifier.weight(1f).height(54.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
-                    border = ButtonDefaults.outlinedButtonBorder(enabled = true)
-                ) {
-                    Icon(Icons.Rounded.Close, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-
-                Button(
-                    onClick = {
-                        doHaptic()
-                        if (state.isPaused) viewModel.resumeTimer() else viewModel.pauseTimer()
-                    },
-                    modifier = Modifier.weight(1f).height(54.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (state.isPaused) StatusOrange else Surface3)
-                ) {
-                    Icon(
-                        if (state.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                        null,
-                        Modifier.size(18.dp),
-                        tint = if (state.isPaused) Color.White else TextPrimary
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        if (state.isPaused) "Resume" else "Pause",
-                        fontWeight = FontWeight.Bold,
-                        color = if (state.isPaused) Color.White else TextPrimary,
-                        fontSize = 13.sp
-                    )
-                }
-
-                Button(
-                    onClick = {
-                        doHaptic()
-                        viewModel.extendTimer()
-                    },
-                    modifier = Modifier.weight(1f).height(54.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentPurple)
-                ) {
-                    Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Extend", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-            }
-        } else {
             // ── Breathing Start Button ─────────────────────────────────
             val infiniteTransition = rememberInfiniteTransition(label = "breathe")
             val breatheScale by infiniteTransition.animateFloat(
@@ -537,6 +582,119 @@ private fun CooldownBanner(
         ) {
             Text("Allow now", style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold, color = StatusGreen)
+        }
+    }
+}
+
+@Composable
+private fun CooldownMainCard(
+    expiresAt: Long,
+    onAllowReconnect: () -> Unit
+) {
+    val initialSec = ((expiresAt - System.currentTimeMillis()).coerceAtLeast(0) + 999) / 1000
+    val remainingSeconds by produceState(
+        initialValue = initialSec,
+        key1 = expiresAt
+    ) {
+        while (System.currentTimeMillis() < expiresAt) {
+            value = ((expiresAt - System.currentTimeMillis()).coerceAtLeast(0) + 999) / 1000
+            kotlinx.coroutines.delay(200)
+        }
+        value = 0L
+    }
+
+    val maxCooldownSec = 60f
+    val progress = (remainingSeconds.toFloat() / maxCooldownSec).coerceIn(0f, 1f)
+
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Surface1),
+        border = BorderStroke(1.dp, StatusOrange.copy(alpha = 0.4f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(StatusOrange.copy(0.15f), CircleShape)
+                    .border(2.dp, StatusOrange.copy(0.4f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.Shield,
+                    contentDescription = null,
+                    tint = StatusOrange,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            Text(
+                text = "Reconnect Protection Active",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                text = "SleepBT is actively preventing auto-reconnection to ensure undisturbed sleep.",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            Box(
+                modifier = Modifier.size(110.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxSize(),
+                    color = StatusOrange,
+                    trackColor = StatusOrange.copy(alpha = 0.15f),
+                    strokeWidth = 6.dp
+                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "${remainingSeconds}s",
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = StatusOrange
+                    )
+                    Text(
+                        text = "remaining",
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Button(
+                onClick = onAllowReconnect,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = StatusGreen)
+            ) {
+                Icon(Icons.Rounded.Check, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Allow Reconnect Now", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
         }
     }
 }
