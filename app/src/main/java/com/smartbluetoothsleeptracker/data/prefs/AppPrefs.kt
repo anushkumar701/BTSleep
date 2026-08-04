@@ -101,7 +101,7 @@ class AppPrefs(private val context: Context) {
         }
 
     // Setters
-    suspend fun setSelectedMinutes(m: Long)       = ds.edit { it[SELECTED_MINUTES] = m.coerceIn(1, 480) }
+    suspend fun setSelectedMinutes(m: Long)       = ds.edit { it[SELECTED_MINUTES] = m.coerceIn(1, 120) }
     suspend fun setExtendMinutes(m: Int)          = ds.edit { it[EXTEND_MINUTES] = m.coerceIn(1, 60) }
     suspend fun setReconnectBlocker(on: Boolean)  = ds.edit { it[RECONNECT_BLOCKER] = on }
     suspend fun setCooldownSeconds(s: Int)        = ds.edit { it[COOLDOWN_SECONDS] = s.coerceIn(0, 120) }

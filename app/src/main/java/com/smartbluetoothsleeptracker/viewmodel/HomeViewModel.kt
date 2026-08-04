@@ -217,7 +217,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             .map { it.address }
             .joinToString(",")
 
-        if (targets.isBlank()) return
+        if (targets.isBlank()) {
+            // Show user-facing feedback instead of silent no-op
+            android.widget.Toast.makeText(
+                getApplication(),
+                "No Bluetooth device connected",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
 
         val intent = TimerService.startIntent(
             getApplication(),

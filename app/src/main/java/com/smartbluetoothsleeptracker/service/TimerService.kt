@@ -201,8 +201,12 @@ class TimerService : Service() {
                 val nm = getSystemService(android.app.NotificationManager::class.java)
 
                 if (settings.sleepAlertsEnabled && !warningFired) {
-                    val warningMs = settings.warningLeadMinutes * 60_000L
-                    if (remaining <= warningMs) {
+                    // Cap warning to at most half the planned duration
+                    // so a 2-min timer with warningLeadMinutes=2 doesn't fire instantly
+                    val plannedMs = plannedMinutes * 60_000L
+                    val rawWarningMs = settings.warningLeadMinutes * 60_000L
+                    val warningMs = minOf(rawWarningMs, plannedMs / 2)
+                    if (remaining <= warningMs && warningMs > 0) {
                         warningFired = true
                         // Merge warning into the timer notification — NO separate notification
                         nm.notify(

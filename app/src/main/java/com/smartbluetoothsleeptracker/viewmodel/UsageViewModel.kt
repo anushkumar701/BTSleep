@@ -271,6 +271,10 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearAll() {
         viewModelScope.launch {
+            val settings = app.prefs.settings.first()
+            // Guard: don't clear if a timer session is actively running
+            // The active session record will be updated by TimerService on expiry
+            if (settings.activeSessionId > 0L) return@launch
             app.db.sessionDao().deleteAll()
             app.db.dailyUsageDao().deleteAll()
             loadData(_period.value)

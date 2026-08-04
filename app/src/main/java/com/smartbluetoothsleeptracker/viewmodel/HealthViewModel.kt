@@ -79,8 +79,9 @@ class HealthViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             // Calculate consecutive low-risk streak (days with <= 60 mins usage)
+            // Start from YESTERDAY — today is still in progress and shouldn't be counted prematurely
             var streakCount = 0
-            var checkDate = today
+            var checkDate = today.minusDays(1)
             var streakActive = true
 
             while (streakActive) {
@@ -95,7 +96,7 @@ class HealthViewModel(application: Application) : AndroidViewModel(application) 
                     if (dMins > 0) {
                         streakCount++
                     } else if (streakCount > 0) {
-                        // 0 usage day does not break streak
+                        // 0-usage day does not break streak (e.g. day off)
                     }
                     checkDate = checkDate.minusDays(1)
                     if (today.toEpochDay() - checkDate.toEpochDay() > 90) break
