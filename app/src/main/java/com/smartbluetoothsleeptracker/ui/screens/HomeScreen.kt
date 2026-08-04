@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -166,7 +167,99 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.weight(0.4f))
+
+        // ── Sleep Protection Overview Card ──────────────────────────────
+        if (!state.isTimerRunning) {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Surface2),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Audio Fade status
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(AccentBlue.copy(0.12f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.VolumeDown,
+                                contentDescription = null,
+                                tint = AccentBlue,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                "Volume Fade",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                "${state.settings.fadeOutDurationSeconds}s smooth fade",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+
+                    // Vertical Divider
+                    Box(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .width(1.dp)
+                            .background(Surface3)
+                    )
+
+                    // Reconnect Blocker status
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(
+                                    if (state.settings.reconnectBlockerEnabled) StatusOrange.copy(0.12f) else TextSecondary.copy(0.12f),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Rounded.Shield,
+                                contentDescription = null,
+                                tint = if (state.settings.reconnectBlockerEnabled) StatusOrange else TextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                "Reconnect Block",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                if (state.settings.reconnectBlockerEnabled) "${state.settings.cooldownSeconds}s active block" else "Disabled",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (state.settings.reconnectBlockerEnabled) StatusOrange else TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.weight(0.6f))
 
         // ── Action Buttons ─────────────────────────────────────────────
         if (state.isTimerRunning) {
