@@ -208,9 +208,9 @@ fun HomeScreen(
                                 color = TextPrimary
                             )
                             Text(
-                                "${state.settings.fadeOutDurationSeconds}s smooth fade",
+                                if (state.settings.playbackStopEnabled) "${state.settings.fadeOutDurationSeconds}s smooth fade" else "Disabled",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = TextSecondary
+                                color = if (state.settings.playbackStopEnabled) AccentBlue else TextSecondary
                             )
                         }
                     }
@@ -834,10 +834,15 @@ private fun RotaryDial(
                                     val dy = change.position.y - centerPx.y
                                     val rawAngle = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
 
-                                    // Calculate dial angle continuous along sweep
-                                    val dialAngle = ((rawAngle.toFloat() - DIAL_START + 360f) % 360f).coerceIn(0f, DIAL_SWEEP)
-                                    val frac = dialAngle / DIAL_SWEEP
-                                    val snapped = (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
+                                    val relativeAngle = (rawAngle.toFloat() - DIAL_START + 360f) % 360f
+                                    val snapped = if (relativeAngle > DIAL_SWEEP && relativeAngle < 345f) {
+                                        // In bottom dead gap — maintain closest bound to prevent wrap jump
+                                        if (lastSnapped < (MAX_MIN - MIN_MIN) / 2) MIN_MIN else MAX_MIN
+                                    } else {
+                                        val dialAngle = relativeAngle.coerceIn(0f, DIAL_SWEEP)
+                                        val frac = dialAngle / DIAL_SWEEP
+                                        (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
+                                    }
 
                                     if (snapped != lastSnapped) {
                                         lastSnapped = snapped
