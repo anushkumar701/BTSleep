@@ -71,7 +71,7 @@ fun HomeScreen(
         }
     }
 
-    var showCooldownPopup by rememberSaveable { mutableStateOf(false) }
+    var showCooldownPopup by rememberSaveable { mutableStateOf(true) }
 
     LaunchedEffect(state.cooldown.expiresAt) {
         if (state.cooldown.active && state.cooldown.expiresAt > System.currentTimeMillis()) {
@@ -81,7 +81,7 @@ fun HomeScreen(
         }
     }
 
-    if (showCooldownPopup && state.cooldown.active) {
+    if (showCooldownPopup && state.cooldown.active && state.cooldown.expiresAt > System.currentTimeMillis()) {
         CooldownPopUpDialog(
             expiresAt = state.cooldown.expiresAt,
             onAllowReconnect = {

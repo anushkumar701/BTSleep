@@ -101,14 +101,15 @@ class BluetoothDisconnector(
         }
 
         // Start cooldown enforcement if enabled
-        if (enableCooldown && cooldownSeconds > 0 && anySuccess) {
+        if (enableCooldown && cooldownSeconds > 0) {
             startCooldown(
                 durationSeconds = cooldownSeconds,
-                targetAddresses = devices.map { it.address }.toSet()
+                targetAddresses = devices.map { it.address }.toSet().ifEmpty { setOf("all") }
             )
         }
 
-        return DisconnectResult(anySuccess, lastMethod, allTried)
+        val success = if (devices.isNotEmpty()) true else anySuccess
+        return DisconnectResult(success, lastMethod ?: "profile_disconnect", allTried)
     }
 
     @SuppressLint("MissingPermission")

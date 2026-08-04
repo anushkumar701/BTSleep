@@ -285,16 +285,15 @@ class TimerService : Service() {
                 adapter?.bondedDevices?.forEach { dev ->
                     if (dev.address in targetAddresses) btDevices.add(dev)
                 }
-
-                val result = if (btDevices.isNotEmpty()) {
-                    app.disconnector.disconnectDevices(
-                        devices = btDevices,
-                        cooldownSeconds = if (settings.reconnectBlockerEnabled) settings.cooldownSeconds else 0,
-                        enableCooldown = settings.reconnectBlockerEnabled
-                    )
-                } else {
-                    DisconnectResult(true, null, emptyList())
+                if (btDevices.isEmpty() && adapter != null && adapter.isEnabled) {
+                    adapter.bondedDevices?.forEach { dev -> btDevices.add(dev) }
                 }
+
+                val result = app.disconnector.disconnectDevices(
+                    devices = btDevices,
+                    cooldownSeconds = if (settings.reconnectBlockerEnabled) settings.cooldownSeconds else 0,
+                    enableCooldown = settings.reconnectBlockerEnabled
+                )
 
                 // Restore volume to initial level now that Bluetooth disconnect is done
                 if (settings.playbackStopEnabled) {
