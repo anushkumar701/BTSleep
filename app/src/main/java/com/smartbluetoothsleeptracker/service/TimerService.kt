@@ -291,6 +291,12 @@ class TimerService : Service() {
                     DisconnectResult(true, null, emptyList())
                 }
 
+                // Restore volume to initial level now that Bluetooth disconnect is done
+                if (settings.playbackStopEnabled) {
+                    Log.i(TAG, "Restoring media volume to pre-fade level after disconnect")
+                    app.playbackController.restoreVolume()
+                }
+
                 // ── STEP 3: Screen Off ─────────────────────────────────────
                 if (settings.screenOffEnabled) {
                     Log.i(TAG, "Step 3: Screen off (lockNow)")

@@ -253,6 +253,29 @@ class BluetoothDisconnector(
         // Cancel any existing enforcement job for this device to prevent concurrent loops
         activeEnforcements[address]?.cancel()
 
+        // 1. Trigger heads-up popup notification
+        val devName = try { device.name ?: address } catch (_: Exception) { address }
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            nm?.notify(
+                1002, // NOTIF_RECONNECT_BLOCKED
+                com.smartbluetoothsleeptracker.core.notification.AppNotifications.reconnectBlockedAlertNotification(context, devName).build()
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to show reconnect blocked notification: ${e.message}")
+        }
+
+        // 2. Show Toast popup on main thread
+        scope.launch(Dispatchers.Main) {
+            try {
+                android.widget.Toast.makeText(
+                    context,
+                    "Reconnect Blocked: $devName",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            } catch (_: Exception) {}
+        }
+
         val job = scope.launch {
             Log.i(TAG, "Enforcing re-disconnect on $address")
             for (i in 1..3) {

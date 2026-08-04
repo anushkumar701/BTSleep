@@ -109,11 +109,7 @@ fun HomeScreen(
                 onMinutesChange = { viewModel.setMinutesEphemeral(it) },
                 onMinutesChangeFinished = { viewModel.saveMinutes(it) },
                 view = view,
-                hapticEnabled = hapticEnabled,
-                lastUsedPreset = state.lastUsedPreset,
-                onPresetSelected = { preset ->
-                    viewModel.saveLastUsedPreset(preset)
-                }
+                hapticEnabled = hapticEnabled
             )
         }
 
@@ -487,9 +483,7 @@ private fun RotaryDial(
     onMinutesChange: (Long) -> Unit,
     onMinutesChangeFinished: (Long) -> Unit,
     view: android.view.View,
-    hapticEnabled: Boolean = true,
-    lastUsedPreset: Long = 0L,
-    onPresetSelected: (Long) -> Unit = {}
+    hapticEnabled: Boolean = true
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val fraction = ((minutes - MIN_MIN).toFloat() / (MAX_MIN - MIN_MIN).toFloat()).coerceIn(0f, 1f)
@@ -548,12 +542,10 @@ private fun RotaryDial(
                     .pointerInput(Unit) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
-                            var fineDetected = false
                             var dragStarted = false
                             val downTime = System.currentTimeMillis()
                             val longPressThreshold = 300L
 
-                            // Wait for either movement or long press
                             while (true) {
                                 val event = awaitPointerEvent()
                                 val change = event.changes.firstOrNull() ?: break
@@ -571,7 +563,6 @@ private fun RotaryDial(
                                 if (!dragStarted && moved) {
                                     dragStarted = true
                                 } else if (!dragStarted && elapsed >= longPressThreshold && !moved) {
-                                    // Long press detected but no movement — give haptic feedback
                                     if (hapticEnabled) {
                                         view.isHapticFeedbackEnabled = true
                                         view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
@@ -585,25 +576,13 @@ private fun RotaryDial(
                                     val dy = change.position.y - centerPx.y
                                     val rawAngle = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
 
-                                    val rawSnapped = if (rawAngle > 45.0 && rawAngle < 135.0) {
-                                        if (rawAngle > 90.0) MIN_MIN else MAX_MIN
-                                    } else {
-                                        val dialAngle = ((rawAngle.toFloat() - DIAL_START + 360f) % 360f).coerceIn(0f, DIAL_SWEEP)
-                                        val frac = dialAngle / DIAL_SWEEP
-                                        (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
-                                    }
+                                    // Calculate dial angle continuous along sweep
+                                    val dialAngle = ((rawAngle.toFloat() - DIAL_START + 360f) % 360f).coerceIn(0f, DIAL_SWEEP)
+                                    val frac = dialAngle / DIAL_SWEEP
+                                    val snapped = (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
 
-                                    // Minute-by-minute step increments (1-min steps by default)
-                                    val snapped = rawSnapped.coerceIn(MIN_MIN, MAX_MIN)
-
-                                    val isJump = kotlin.math.abs(snapped - lastSnapped) > (MAX_MIN - MIN_MIN) / 2
-                                    val finalSnapped = if (isJump) {
-                                        if (lastSnapped < (MAX_MIN - MIN_MIN) / 2) MIN_MIN else MAX_MIN
-                                    } else {
-                                        snapped
-                                    }
-                                    if (finalSnapped != lastSnapped) {
-                                        lastSnapped = finalSnapped
+                                    if (snapped != lastSnapped) {
+                                        lastSnapped = snapped
                                         if (hapticEnabled) {
                                             view.isHapticFeedbackEnabled = true
                                             view.performHapticFeedback(
@@ -613,7 +592,7 @@ private fun RotaryDial(
                                             com.smartbluetoothsleeptracker.core.haptics.HapticManager.vibrateTick(context)
                                         }
                                     }
-                                    onMinutesChange(finalSnapped)
+                                    onMinutesChange(snapped)
                                 }
                             }
                         }
@@ -636,53 +615,6 @@ private fun RotaryDial(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text("minutes", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        // Quick presets with "last used" highlight
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            listOf(15L, 30L, 45L, 60L, 90L, 120L).forEach { preset ->
-                val selected = minutes == preset
-                val isLastUsed = lastUsedPreset == preset && !selected
-                Box(
-                    modifier = Modifier
-                        .background(
-                            if (selected) AccentBlue else Surface2,
-                            RoundedCornerShape(12.dp)
-                        )
-                        .then(
-                            if (isLastUsed) Modifier.border(
-                                1.5.dp, AccentBlue.copy(0.6f), RoundedCornerShape(12.dp)
-                            ) else Modifier
-                        )
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable {
-                            if (hapticEnabled) {
-                                view.isHapticFeedbackEnabled = true
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
-                            }
-                            onMinutesChange(preset)
-                            onMinutesChangeFinished(preset)
-                            onPresetSelected(preset)
-                        }
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = if (preset >= 60) "${preset / 60}h${if (preset % 60 > 0) "${preset % 60}" else ""}" else "${preset}m",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (selected || isLastUsed) FontWeight.Bold else FontWeight.Medium,
-                        color = when {
-                            selected -> TextOnAccent
-                            isLastUsed -> AccentBlue
-                            else -> TextSecondary
-                        }
-                    )
-                }
             }
         }
     }

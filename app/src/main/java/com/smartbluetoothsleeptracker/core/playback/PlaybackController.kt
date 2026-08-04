@@ -111,18 +111,7 @@ class PlaybackController(private val context: Context) {
             // Steal focus and pause media sessions
             stealAudioFocusAndPause()
 
-            // Restore volume after a short delay so user's next session isn't muted
-            val savedPriorVol = priorVolume
-            CoroutineScope(Dispatchers.Main).launch {
-                delay(3000)
-                try {
-                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, savedPriorVol, 0)
-                    Log.i(TAG, "Post-fade: restored STREAM_MUSIC volume to $savedPriorVol after 3s delay")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Post-fade volume restore failed: ${e.message}")
-                }
-            }
-
+            Log.i(TAG, "Fade completed naturally — STREAM_MUSIC volume reached 0. Preserved prior volume: $priorVolume")
             return@withContext FadeResult.COMPLETED
 
         } finally {
@@ -130,6 +119,21 @@ class PlaybackController(private val context: Context) {
             unregisterVolumeReceiver()
             internalVolumeChanges.clear()
             Log.d(TAG, "Unregistered volume receiver and cleared internal change history")
+        }
+    }
+
+    /**
+     * Restores media volume (STREAM_MUSIC) to [priorVolume] recorded before fade out.
+     * To be called AFTER Bluetooth disconnection completes.
+     */
+    fun restoreVolume() {
+        if (priorVolume > 0) {
+            try {
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, priorVolume, 0)
+                Log.i(TAG, "Restored STREAM_MUSIC volume to $priorVolume after disconnect sequence")
+            } catch (e: Exception) {
+                Log.w(TAG, "Volume restore failed: ${e.message}")
+            }
         }
     }
 

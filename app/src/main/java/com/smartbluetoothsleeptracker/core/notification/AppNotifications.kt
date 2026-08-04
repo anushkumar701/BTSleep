@@ -94,6 +94,27 @@ object AppNotifications {
     }
 
     /**
+     * Heads-up popup notification shown when a Bluetooth device attempts to reconnect during cooldown.
+     */
+    fun reconnectBlockedAlertNotification(ctx: Context, deviceName: String): NotificationCompat.Builder {
+        val allowIntent = PendingIntent.getService(
+            ctx, 105,
+            Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_ALLOW_RECONNECT),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        return NotificationCompat.Builder(ctx, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Reconnect Blocked")
+            .setContentText("Blocked reconnect attempt from $deviceName (Cooldown Active)")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .addAction(0, "Allow Reconnect Now", allowIntent)
+            .setContentIntent(launchIntent(ctx))
+    }
+
+    /**
      * Result notification after disconnect attempt.
      */
     fun disconnectResultNotification(ctx: Context, success: Boolean, deviceName: String): NotificationCompat.Builder {
