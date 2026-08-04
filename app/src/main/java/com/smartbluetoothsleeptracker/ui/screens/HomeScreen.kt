@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,12 +71,12 @@ fun HomeScreen(
         }
     }
 
-    var showCooldownPopup by remember { mutableStateOf(false) }
+    var showCooldownPopup by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(state.cooldown.active) {
-        if (state.cooldown.active) {
+    LaunchedEffect(state.cooldown.expiresAt) {
+        if (state.cooldown.active && state.cooldown.expiresAt > System.currentTimeMillis()) {
             showCooldownPopup = true
-        } else {
+        } else if (!state.cooldown.active) {
             showCooldownPopup = false
         }
     }

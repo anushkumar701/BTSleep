@@ -382,34 +382,7 @@ class TimerService : Service() {
     private fun cancelTimer() {
         tickJob?.cancel()
         autoResumeJob?.cancel()
-        scope.launch {
-            if (sessionId > 0) {
-                val existing = app.db.sessionDao().getOrphanedSession()
-                if (existing != null) {
-                    val startTime = if (sessionStartTime > 0L) sessionStartTime else existing.startTime
-                    val totalActiveMs = (System.currentTimeMillis() - startTime - totalPausedMs).coerceAtLeast(0)
-                    val playedMin = (totalActiveMs / 60_000L).toInt().coerceAtLeast(1)
-                    app.db.sessionDao().update(existing.copy(
-                        endTime = System.currentTimeMillis(),
-                        actualDurationMin = playedMin,
-                        disconnectConfirmed = false
-                    ))
-                }
-            }
-            app.prefs.clearTimer()
-        }
-
-        HapticManager.vibrateDisconnected(this)
-
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(applicationContext, "Session ended manually", Toast.LENGTH_SHORT).show()
-        }
-
-        releaseWakeLock()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-        sendBroadcast(Intent("com.sleepbt.TIMER_END").setPackage(packageName))
-        Log.i(TAG, "Timer cancelled — session saved with actual active played duration")
+        onTimerExpired()
     }
 
     private fun extendTimer() {

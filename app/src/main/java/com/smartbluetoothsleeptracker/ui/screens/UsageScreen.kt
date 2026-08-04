@@ -467,7 +467,7 @@ private fun SessionRow(session: SessionEntity, onDelete: () -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = if (session.disconnectConfirmed) Icons.Rounded.CheckCircle else Icons.Rounded.PowerSettingsNew,
+                imageVector = if (session.disconnectConfirmed) Icons.Rounded.CheckCircle else Icons.Rounded.BluetoothDisabled,
                 contentDescription = null,
                 tint = if (session.disconnectConfirmed) StatusGreen else TextSecondary,
                 modifier = Modifier.size(18.dp)
