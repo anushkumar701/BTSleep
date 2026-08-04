@@ -189,31 +189,45 @@ class TimerService : Service() {
                 val remaining = endTimeMillis - System.currentTimeMillis()
 
                 if (remaining <= 0) {
+                    // Cancel the timer notification immediately — never show 0:00
+                    val nm = getSystemService(android.app.NotificationManager::class.java)
+                    nm.cancel(AppNotifications.NOTIF_TIMER)
                     onTimerExpired()
                     return@launch
                 }
 
                 // Check warning notification threshold
                 val settings = app.prefs.settings.first()
+                val nm = getSystemService(android.app.NotificationManager::class.java)
+
                 if (settings.sleepAlertsEnabled && !warningFired) {
                     val warningMs = settings.warningLeadMinutes * 60_000L
                     if (remaining <= warningMs) {
                         warningFired = true
-                        val nm = getSystemService(android.app.NotificationManager::class.java)
+                        // Merge warning into the timer notification — NO separate notification
                         nm.notify(
-                            AppNotifications.NOTIF_WARNING,
-                            AppNotifications.warningNotification(this@TimerService, settings.warningLeadMinutes).build()
+                            AppNotifications.NOTIF_TIMER,
+                            AppNotifications.timerNotification(
+                                this@TimerService,
+                                formatRemaining(),
+                                warningText = "⚠ ${settings.warningLeadMinutes}m left — BT will disconnect"
+                            ).build()
                         )
                         HapticManager.vibrateWarning(this@TimerService)
+                    } else {
+                        // Normal tick update
+                        nm.notify(
+                            AppNotifications.NOTIF_TIMER,
+                            AppNotifications.timerNotification(this@TimerService, formatRemaining()).build()
+                        )
                     }
+                } else {
+                    // Normal tick update
+                    nm.notify(
+                        AppNotifications.NOTIF_TIMER,
+                        AppNotifications.timerNotification(this@TimerService, formatRemaining()).build()
+                    )
                 }
-
-                // Update live status notification
-                val nm = getSystemService(android.app.NotificationManager::class.java)
-                nm.notify(
-                    AppNotifications.NOTIF_TIMER,
-                    AppNotifications.timerNotification(this@TimerService, formatRemaining()).build()
-                )
 
                 // Send TICK broadcast for app UI
                 val tickIntent = Intent("com.sleepbt.TICK").apply {
@@ -325,7 +339,6 @@ class TimerService : Service() {
 
                 if (settings.sleepAlertsEnabled) {
                     val nm = getSystemService(android.app.NotificationManager::class.java)
-                    nm.cancel(AppNotifications.NOTIF_WARNING)
                     nm.notify(
                         AppNotifications.NOTIF_DISCONNECT_RESULT,
                         AppNotifications.disconnectResultNotification(this@TimerService, result.success, devName).build()

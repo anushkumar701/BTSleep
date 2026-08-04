@@ -44,8 +44,13 @@ object AppNotifications {
 
     /**
      * Foreground service notification showing countdown.
+     * When [warningText] is provided, it replaces the subtitle with a warning line.
      */
-    fun timerNotification(ctx: Context, remainingText: String): NotificationCompat.Builder {
+    fun timerNotification(
+        ctx: Context,
+        remainingText: String,
+        warningText: String? = null
+    ): NotificationCompat.Builder {
         val cancelIntent = PendingIntent.getService(
             ctx, 100,
             Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_CANCEL),
@@ -60,36 +65,11 @@ object AppNotifications {
         return NotificationCompat.Builder(ctx, CHANNEL_TIMER)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("SleepBT Active")
-            .setContentText(remainingText)
+            .setContentText(if (warningText != null) "$remainingText  •  $warningText" else remainingText)
             .setOngoing(true)
             .setSilent(true)
             .addAction(0, "Extend", extendIntent)
             .addAction(0, "Cancel", cancelIntent)
-            .setContentIntent(launchIntent(ctx))
-    }
-
-    /**
-     * Warning notification before timer ends.
-     */
-    fun warningNotification(ctx: Context, minutesLeft: Int): NotificationCompat.Builder {
-        val extendIntent = PendingIntent.getService(
-            ctx, 102,
-            Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_EXTEND),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val endNowIntent = PendingIntent.getService(
-            ctx, 103,
-            Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_END_NOW),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        return NotificationCompat.Builder(ctx, CHANNEL_ALERTS)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Timer ending soon")
-            .setContentText("$minutesLeft minute${if (minutesLeft != 1) "s" else ""} remaining — Bluetooth will disconnect")
-            .setAutoCancel(true)
-            .addAction(0, "Extend", extendIntent)
-            .addAction(0, "End now", endNowIntent)
             .setContentIntent(launchIntent(ctx))
     }
 
