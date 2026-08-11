@@ -132,8 +132,8 @@ class BluetoothReceiver : BroadcastReceiver() {
                         val pendingResult = goAsync()
                         CoroutineScope(Dispatchers.IO).launch {
                             try {
-                                // Skip if TimerService created a session for this device recently (last 3 minutes)
-                                val recentSession = app.db.sessionDao().getRecentSessionForDevice(address, now - 180_000L)
+                                // Skip if TimerService created or updated a session for this device recently (last 5 minutes)
+                                val recentSession = app.db.sessionDao().getRecentSessionForDevice(address, now - 300_000L)
                                 if (recentSession != null) {
                                     Log.i(TAG, "Skipping background session insertion — already recorded by TimerService")
                                     return@launch

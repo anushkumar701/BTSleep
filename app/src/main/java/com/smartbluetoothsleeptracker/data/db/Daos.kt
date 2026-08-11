@@ -89,6 +89,12 @@ interface SessionDao {
     @Query("DELETE FROM sessions WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("SELECT * FROM sessions WHERE id = :id")
+    suspend fun getById(id: Long): SessionEntity?
+
+    @Query("SELECT * FROM sessions WHERE date = :date ORDER BY start_time DESC")
+    suspend fun sessionsForDateNow(date: String): List<SessionEntity>
+
     @Query("DELETE FROM sessions WHERE device_address = :address")
     suspend fun deleteForDevice(address: String)
 
@@ -104,7 +110,7 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE planned_duration_min > 0 ORDER BY start_time DESC LIMIT 100")
     suspend fun recentSessionsNow(): List<SessionEntity>
 
-    @Query("SELECT * FROM sessions WHERE device_address = :address AND start_time >= :minStartTime LIMIT 1")
+    @Query("SELECT * FROM sessions WHERE device_address = :address AND (start_time >= :minStartTime OR end_time >= :minStartTime OR end_time IS NULL) LIMIT 1")
     suspend fun getRecentSessionForDevice(address: String, minStartTime: Long): SessionEntity?
 
     @Query("DELETE FROM sessions WHERE actual_duration_min <= 0 AND planned_duration_min <= 0")
@@ -135,6 +141,9 @@ interface DailyUsageDao {
 
     @Query("DELETE FROM daily_usage WHERE device_address = :address")
     suspend fun deleteForDevice(address: String)
+
+    @Query("DELETE FROM daily_usage WHERE device_address = :address AND date = :date")
+    suspend fun deleteForDeviceAndDate(address: String, date: String)
 
     @Query("DELETE FROM daily_usage")
     suspend fun deleteAll()
