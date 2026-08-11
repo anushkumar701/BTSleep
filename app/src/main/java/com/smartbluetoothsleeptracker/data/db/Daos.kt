@@ -115,6 +115,9 @@ interface SessionDao {
 
     @Query("DELETE FROM sessions WHERE actual_duration_min <= 0 AND planned_duration_min <= 0")
     suspend fun deleteEmptySessions()
+
+    @Query("DELETE FROM sessions WHERE id NOT IN (SELECT id FROM sessions ORDER BY start_time DESC LIMIT :maxKeep)")
+    suspend fun pruneOldSessions(maxKeep: Int = 10)
 }
 
 @Dao

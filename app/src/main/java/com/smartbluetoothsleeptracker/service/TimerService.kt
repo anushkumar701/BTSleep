@@ -330,6 +330,7 @@ class TimerService : Service() {
                         date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                     )
                 )
+                app.db.sessionDao().pruneOldSessions(10)
 
                 val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                 for (addr in targetAddresses) {

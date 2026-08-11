@@ -81,6 +81,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val toStr = to.format(fmt)
 
         app.db.sessionDao().deleteEmptySessions()
+        app.db.sessionDao().pruneOldSessions(10)
 
         // Fetch raw sessions in date range
         val rawSessions = app.db.sessionDao().sessionsInRangeNow(fromStr, toStr)

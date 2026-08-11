@@ -151,6 +151,7 @@ class BluetoothReceiver : BroadcastReceiver() {
                                         date = today
                                     )
                                 )
+                                app.db.sessionDao().pruneOldSessions(10)
 
                                 val existingUsage = app.db.dailyUsageDao().getForDate(today)
                                     .find { it.deviceAddress == address }
