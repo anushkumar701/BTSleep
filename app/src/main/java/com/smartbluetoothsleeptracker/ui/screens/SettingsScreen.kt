@@ -395,6 +395,12 @@ fun SettingsScreen(
                 HorizontalDivider(color = SurfaceBorder)
                 Spacer(Modifier.height(12.dp))
                 Text(
+                    "Support & Feedback: midnightcompiler01@gmail.com",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AccentBlue
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
                     "© 2026 Midnight Compiler. All rights reserved.",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextTertiary

@@ -69,8 +69,8 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
             }
 
             LegalSection("Contact") {
-                "For questions about this privacy policy, contact the developer via the repository " +
-                "where this app is distributed."
+                "For questions about this privacy policy or support, contact the developer at " +
+                "midnightcompiler01@gmail.com."
             }
 
             Spacer(Modifier.height(24.dp))

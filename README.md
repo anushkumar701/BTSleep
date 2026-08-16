@@ -53,5 +53,13 @@ The compiled APK will be located at:
 
 ---
 
+## 📬 Contact & Support
+
+Created & maintained by **Midnight Compiler**.
+- **Email**: [midnightcompiler01@gmail.com](mailto:midnightcompiler01@gmail.com)
+- **GitHub**: [anushkumar701](https://github.com/anushkumar701)
+
+---
+
 ## 📄 License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
