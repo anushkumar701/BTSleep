@@ -387,7 +387,7 @@ fun SettingsScreen(
                         checking = false
                         val info = updateManager.updateState.value
                         if (!info.isAvailable) {
-                            android.widget.Toast.makeText(context, "SleepBT is up to date (v1.0.2)", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(context, "SleepBT is up to date (v1.0.0)", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -413,7 +413,7 @@ fun SettingsScreen(
                     Spacer(Modifier.width(14.dp))
                     Column {
                         Text("SleepBT", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text("Version 1.0.2", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                        Text("Version 1.0.0", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     }
                 }
                 Spacer(Modifier.height(12.dp))
