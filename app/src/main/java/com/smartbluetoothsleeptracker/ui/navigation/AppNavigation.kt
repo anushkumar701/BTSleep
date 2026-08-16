@@ -65,7 +65,7 @@ fun AppNavigation(
                     val remSec = (homeState.remainingMs / 1000L).coerceAtLeast(0L)
                     val m = remSec / 60
                     val s = remSec % 60
-                    val timeStr = String.format("%02d:%02d", m, s)
+                    val timeStr = String.format(java.util.Locale.ROOT, "%02d:%02d", m, s)
 
                     Surface(
                         color = Surface2,

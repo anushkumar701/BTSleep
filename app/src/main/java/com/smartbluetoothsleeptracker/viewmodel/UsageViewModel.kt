@@ -130,7 +130,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                 val currentHour = LocalDateTime.now().hour
                 val currentBucket = (currentHour / 4) * 4
                 (0..20 step 4).map { h ->
-                    val label = String.format("%02d:00", h)
+                    val label = String.format(java.util.Locale.ROOT, "%02d:00", h)
                     var hourMins = sessions.filter {
                         val sTime = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(it.startTime), ZoneId.systemDefault())
                         sTime.toLocalDate() == today && sTime.hour in h until (h + 4)

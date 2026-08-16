@@ -880,7 +880,7 @@ private fun CountdownDisplay(remainingMs: Long, totalDurationMs: Long) {
             // Time text
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%d:%02d", m, s),
+                    text = if (h > 0) String.format(java.util.Locale.ROOT, "%d:%02d:%02d", h, m, s) else String.format(java.util.Locale.ROOT, "%d:%02d", m, s),
                     style = MaterialTheme.typography.displayLarge,
                     fontWeight = FontWeight.Black,
                     color = TextPrimary,
