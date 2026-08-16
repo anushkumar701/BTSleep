@@ -29,6 +29,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -316,7 +320,7 @@ private fun RenderTermsMarkdown(content: String) {
             when {
                 trimmed.startsWith("# ") -> {
                     Text(
-                        text = trimmed.removePrefix("# ").trim(),
+                        text = parseMarkdownText(trimmed.removePrefix("# ").trim()),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = AccentBlue,
@@ -325,7 +329,7 @@ private fun RenderTermsMarkdown(content: String) {
                 }
                 trimmed.startsWith("### ") -> {
                     Text(
-                        text = trimmed.removePrefix("### ").trim(),
+                        text = parseMarkdownText(trimmed.removePrefix("### ").trim()),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
@@ -345,7 +349,7 @@ private fun RenderTermsMarkdown(content: String) {
                     ) {
                         Text("• ", color = AccentBlue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Text(
-                            text = trimmed.removePrefix("* ").trim(),
+                            text = parseMarkdownText(trimmed.removePrefix("* ").trim()),
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = Color(0xFFE6E6E6),
                                 lineHeight = 20.sp,
@@ -356,7 +360,7 @@ private fun RenderTermsMarkdown(content: String) {
                 }
                 trimmed.isNotEmpty() -> {
                     Text(
-                        text = trimmed,
+                        text = parseMarkdownText(trimmed),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = Color(0xFFE6E6E6),
                             lineHeight = 20.sp,
@@ -364,6 +368,22 @@ private fun RenderTermsMarkdown(content: String) {
                         )
                     )
                 }
+            }
+        }
+    }
+}
+
+private fun parseMarkdownText(text: String): AnnotatedString {
+    val cleanText = text.replace("`", "")
+    val parts = cleanText.split("**")
+    return buildAnnotatedString {
+        parts.forEachIndexed { index, part ->
+            if (index % 2 == 1) {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TextPrimary)) {
+                    append(part)
+                }
+            } else {
+                append(part)
             }
         }
     }
