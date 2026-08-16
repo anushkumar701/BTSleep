@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.focus.onFocusChanged
@@ -366,6 +367,30 @@ fun SettingsScreen(
                 icon = Icons.Rounded.Gavel,
                 title = "Terms of Service",
                 onClick = onNavigateToTermsOfService
+            )
+        }
+
+        // ── UPDATES ───────────────────────────────────────────────────
+        item { Spacer(Modifier.height(8.dp)); SectionHeader("Updates") }
+        item {
+            val scope = rememberCoroutineScope()
+            var checking by remember { mutableStateOf(false) }
+            val updateManager = remember { com.smartbluetoothsleeptracker.core.update.UpdateManager(context) }
+
+            SettingNavRow(
+                icon = Icons.Rounded.SystemUpdate,
+                title = if (checking) "Checking for updates..." else "Check for Updates",
+                onClick = {
+                    scope.launch {
+                        checking = true
+                        updateManager.checkForUpdates()
+                        checking = false
+                        val info = updateManager.updateState.value
+                        if (!info.isAvailable) {
+                            android.widget.Toast.makeText(context, "SleepBT is up to date (v1.0.0)", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             )
         }
 

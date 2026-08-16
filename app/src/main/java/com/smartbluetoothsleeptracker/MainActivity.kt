@@ -30,10 +30,17 @@ class MainActivity : ComponentActivity() {
         val app = application as SleepBTApp
         val homeVm = ViewModelProvider(this)[HomeViewModel::class.java]
 
+        val updateManager = com.smartbluetoothsleeptracker.core.update.UpdateManager(this)
+
         setContent {
             val scope = rememberCoroutineScope()
             val settingsState by produceState<AppSettings?>(initialValue = null) {
                 app.prefs.settings.collect { value = it }
+            }
+            val updateInfo by updateManager.updateState.collectAsState()
+
+            LaunchedEffect(Unit) {
+                updateManager.checkForUpdates()
             }
 
             if (settingsState != null) {
@@ -62,6 +69,18 @@ class MainActivity : ComponentActivity() {
                     } else {
                         AppNavigation(homeViewModel = homeVm)
                     }
+
+                    com.smartbluetoothsleeptracker.ui.components.UpdateDialog(
+                        updateInfo = updateInfo,
+                        onUpdateClick = {
+                            scope.launch {
+                                updateManager.downloadAndInstallApk(updateInfo.downloadUrl)
+                            }
+                        },
+                        onDismissClick = {
+                            updateManager.dismissUpdate()
+                        }
+                    )
                 }
             } else {
                 // Dark background placeholder during cold start load
