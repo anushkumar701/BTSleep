@@ -395,7 +395,7 @@ fun SettingsScreen(
                 HorizontalDivider(color = SurfaceBorder)
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "© 2026 DreamSync. All rights reserved.",
+                    "© 2026 Midnight Compiler. All rights reserved.",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextTertiary
                 )

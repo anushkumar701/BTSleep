@@ -44,6 +44,6 @@ Welcome to **SleepBT**, your privacy-focused Bluetooth sleep timer and ear healt
 ---
 
 ### 7. Contact & Open Governance
-SleepBT is crafted by **DreamSync** with an absolute commitment to user privacy, offline security, and open device management.
+SleepBT is crafted by **Midnight Compiler** with an absolute commitment to user privacy, offline security, and open device management.
 
 By tapping **"Agree & Continue"**, you confirm that you have read, understood, and agreed to these Terms of Service and Privacy Policy.

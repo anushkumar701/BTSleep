@@ -163,7 +163,7 @@ fun TermsOfServiceScreen(onBack: () -> Unit) {
             }
 
             LegalSection("Intellectual Property") {
-                "© 2026 DreamSync. All rights reserved.\n\n" +
+                "© 2026 Midnight Compiler. All rights reserved.\n\n" +
                 "This app and its source code are the property of the developer. " +
                 "Redistribution without permission is not authorized."
             }
