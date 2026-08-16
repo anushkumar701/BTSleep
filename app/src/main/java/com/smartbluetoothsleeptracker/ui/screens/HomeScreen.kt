@@ -220,10 +220,12 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Bluetooth, null, tint = AccentBlue, modifier = Modifier.size(16.dp))
+                            val activeDev = state.connectedDevices.firstOrNull()
+                            val devIcon = if (activeDev?.type == com.smartbluetoothsleeptracker.data.db.DeviceType.WIRED_HEADPHONES) Icons.Rounded.Headphones else Icons.Rounded.Bluetooth
+                            Icon(devIcon, null, tint = AccentBlue, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                state.connectedDevices.firstOrNull()?.name ?: "Bluetooth Device",
+                                activeDev?.name ?: "Connected Device",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextPrimary
@@ -388,7 +390,7 @@ fun HomeScreen(
                 label = "glowAlpha"
             )
 
-            val isEnabled = state.connectedDevices.isNotEmpty() && state.btEnabled
+            val isEnabled = state.connectedDevices.isNotEmpty() && (state.btEnabled || state.connectedDevices.any { it.type == com.smartbluetoothsleeptracker.data.db.DeviceType.WIRED_HEADPHONES })
 
             Box(modifier = Modifier.fillMaxWidth()) {
                 // Glow ring behind button
@@ -433,10 +435,10 @@ fun HomeScreen(
                 }
             }
 
-            if (state.connectedDevices.isEmpty() || !state.btEnabled) {
+            if (!isEnabled) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    if (!state.btEnabled) "Bluetooth is off"
+                    if (!state.btEnabled && state.connectedDevices.isEmpty()) "Bluetooth is off & no wired headset"
                     else "No audio device connected",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextTertiary,

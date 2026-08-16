@@ -5,7 +5,7 @@ import androidx.room.*
 // ── Enums ──────────────────────────────────────────────────────────────
 
 enum class DeviceType {
-    EARBUDS, NECKBAND, HOME_THEATRE, PC, SMARTWATCH, OTHER
+    EARBUDS, NECKBAND, HOME_THEATRE, PC, SMARTWATCH, WIRED_HEADPHONES, OTHER
 }
 
 // ── Entities ───────────────────────────────────────────────────────────

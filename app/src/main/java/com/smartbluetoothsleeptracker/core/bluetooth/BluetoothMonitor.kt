@@ -83,12 +83,16 @@ class BluetoothMonitor(
                     scope.launch { refreshConnectedDevices() }
                     onDeviceDisconnected?.invoke(device)
                 }
+                Intent.ACTION_HEADSET_PLUG,
+                android.media.AudioManager.ACTION_HEADSET_PLUG -> {
+                    scope.launch { refreshConnectedDevices() }
+                }
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                     _btEnabled.value = state == BluetoothAdapter.STATE_ON
                     if (state == BluetoothAdapter.STATE_OFF) {
                         aclConnectedAddresses.clear()
-                        _connectedDevices.value = emptyList()
+                        scope.launch { refreshConnectedDevices() }
                     } else if (state == BluetoothAdapter.STATE_ON) {
                         scope.launch { refreshConnectedDevices() }
                     }
@@ -102,6 +106,8 @@ class BluetoothMonitor(
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+            addAction(Intent.ACTION_HEADSET_PLUG)
+            addAction(android.media.AudioManager.ACTION_HEADSET_PLUG)
         }
         androidx.core.content.ContextCompat.registerReceiver(
             context,
@@ -119,40 +125,52 @@ class BluetoothMonitor(
 
     @SuppressLint("MissingPermission")
     suspend fun refreshConnectedDevices() {
-        val ad = adapter ?: return
-        if (!ad.isEnabled) { _connectedDevices.value = emptyList(); return }
-
         val connected = mutableListOf<ConnectedDevice>()
 
-        runCatching {
-            val bonded = ad.bondedDevices ?: emptySet()
+        // Check if Wired Headset is plugged in
+        if (com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.isWiredConnected(context)) {
+            val dbDevice = db.deviceDao().getDevice(com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS)
+            connected.add(
+                ConnectedDevice(
+                    address = com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS,
+                    name = dbDevice?.name ?: com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_NAME,
+                    isFavorite = dbDevice?.isFavorite ?: false,
+                    type = DeviceType.WIRED_HEADPHONES
+                )
+            )
+        }
 
-            bonded.forEach { device ->
-                val reflectConn = try {
-                    val method = device.javaClass.getMethod("isConnected")
-                    method.isAccessible = true
-                    method.invoke(device) as? Boolean ?: false
-                } catch (_: Exception) { false }
+        val ad = adapter
+        if (ad != null && ad.isEnabled) {
+            runCatching {
+                val bonded = ad.bondedDevices ?: emptySet()
 
-                val aclConn = aclConnectedAddresses.contains(device.address)
+                bonded.forEach { device ->
+                    val reflectConn = try {
+                        val method = device.javaClass.getMethod("isConnected")
+                        method.isAccessible = true
+                        method.invoke(device) as? Boolean ?: false
+                    } catch (_: Exception) { false }
 
-                // A device is connected if its ACL link is connected or if its reflects as connected.
-                val isConn = aclConn || reflectConn
+                    val aclConn = aclConnectedAddresses.contains(device.address)
 
-                if (isConn) {
-                    com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(
-                        context, device.address, System.currentTimeMillis()
-                    )
-                    val dbDevice = db.deviceDao().getDevice(device.address)
-                    connected.add(
-                        ConnectedDevice(
-                            address = device.address,
-                            name = device.name ?: device.address,
-                            isFavorite = dbDevice?.isFavorite ?: false,
-                            type = dbDevice?.deviceType ?: inferDeviceType(device),
-                            device = device
+                    val isConn = aclConn || reflectConn
+
+                    if (isConn) {
+                        com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(
+                            context, device.address, System.currentTimeMillis()
                         )
-                    )
+                        val dbDevice = db.deviceDao().getDevice(device.address)
+                        connected.add(
+                            ConnectedDevice(
+                                address = device.address,
+                                name = device.name ?: device.address,
+                                isFavorite = dbDevice?.isFavorite ?: false,
+                                type = dbDevice?.deviceType ?: inferDeviceType(device),
+                                device = device
+                            )
+                        )
+                    }
                 }
             }
         }

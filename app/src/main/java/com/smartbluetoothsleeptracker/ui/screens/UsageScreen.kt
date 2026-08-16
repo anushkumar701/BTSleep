@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -376,6 +378,7 @@ private fun DeviceRow(stat: DeviceUsageStat, onClick: () -> Unit) {
         DeviceType.HOME_THEATRE -> Icons.Rounded.Speaker
         DeviceType.PC -> Icons.Rounded.Computer
         DeviceType.SMARTWATCH -> Icons.Rounded.Watch
+        DeviceType.WIRED_HEADPHONES -> Icons.Rounded.Headphones
         DeviceType.OTHER -> Icons.Rounded.Bluetooth
     }
 
@@ -466,10 +469,17 @@ private fun SessionRow(session: SessionEntity, onDelete: () -> Unit) {
                 ),
             contentAlignment = Alignment.Center
         ) {
+            val sessionIcon = if (session.deviceAddress == com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS) {
+                Icons.Rounded.Headphones
+            } else if (session.disconnectConfirmed) {
+                Icons.Rounded.CheckCircle
+            } else {
+                Icons.Rounded.Bluetooth
+            }
             Icon(
-                imageVector = if (session.disconnectConfirmed) Icons.Rounded.CheckCircle else Icons.Rounded.Bluetooth,
+                imageVector = sessionIcon,
                 contentDescription = null,
-                tint = if (session.disconnectConfirmed) StatusGreen else TextSecondary,
+                tint = if (session.deviceAddress == com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS) AccentBlue else if (session.disconnectConfirmed) StatusGreen else TextSecondary,
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -561,16 +571,23 @@ private fun DeviceBottomSheet(
             // Device type selector
             Text("Device Type", style = MaterialTheme.typography.labelMedium, color = TextTertiary)
             Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(6.dp)) {
-                DeviceType.entries.take(4).forEach { type ->
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                Arrangement.spacedBy(6.dp)
+            ) {
+                DeviceType.entries.forEach { type ->
                     val selected = stat.device.deviceType == type
+                    val labelName = when(type) {
+                        DeviceType.WIRED_HEADPHONES -> "Wired"
+                        else -> type.name.lowercase().replaceFirstChar { it.uppercase() }
+                    }
                     Box(
                         Modifier.background(if (selected) AccentBlue else Surface3, RoundedCornerShape(10.dp))
                             .clip(RoundedCornerShape(10.dp))
                             .clickable { onSetType(stat.device.address, type) }
                             .padding(horizontal = 10.dp, vertical = 8.dp)
                     ) {
-                        Text(type.name.lowercase().replaceFirstChar { it.uppercase() },
+                        Text(labelName,
                             style = MaterialTheme.typography.labelSmall,
                             color = if (selected) TextOnAccent else TextSecondary,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)

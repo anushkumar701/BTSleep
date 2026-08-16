@@ -69,6 +69,17 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!-- Wired Headset state receiver -->
+        <receiver
+            android:name=".receiver.WiredHeadsetReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.HEADSET_PLUG" />
+                <action android:name="android.media.AUDIO_BECOMING_NOISY" />
+            </intent-filter>
+        </receiver>
+
         <!-- Bluetooth state receiver -->
         <receiver
             android:name=".receiver.BluetoothReceiver"
