@@ -116,13 +116,24 @@ fun HomeScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        if (state.cooldown.active) {
+        AnimatedContent(
+            targetState = Pair(state.cooldown.active, state.isTimerRunning),
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(400)) + slideInVertically { it / 8 }).togetherWith(
+                    fadeOut(animationSpec = tween(400))
+                )
+            },
+            label = "MainContent",
+            modifier = Modifier.fillMaxWidth()
+        ) { (cooldownActive, timerRunning) ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                if (cooldownActive) {
             // ── MAIN RECONNECT BLOCKER VIEW ON HOME SCREEN WHEN TIMER ENDS ──
             CooldownMainCard(
                 expiresAt = state.cooldown.expiresAt,
                 onAllowReconnect = { viewModel.allowReconnect() }
             )
-        } else if (state.isTimerRunning) {
+                } else if (timerRunning) {
             // ── ACTIVE TIMER VIEW ──
             val totalDurationMs = (state.settings.timerPlannedMinutes + state.settings.timerExtendedMinutes) * 60_000L
             CountdownDisplay(remainingMs = state.remainingMs, totalDurationMs = totalDurationMs)
@@ -139,38 +150,49 @@ fun HomeScreen(
                         doHaptic()
                         viewModel.cancelTimer()
                     },
-                    modifier = Modifier.weight(1f).height(50.dp),
+                    modifier = Modifier.weight(1f).height(60.dp),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
-                    border = ButtonDefaults.outlinedButtonBorder(enabled = true)
+                    border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
+                    contentPadding = PaddingValues(0.dp)
                 ) {
-                    Icon(Icons.Rounded.Close, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.Close, null, Modifier.size(20.dp))
+                        Spacer(Modifier.height(2.dp))
+                        Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
                 }
 
+                val pauseBgColor by animateColorAsState(if (state.isPaused) StatusOrange else Surface3, label = "pauseBg")
+                val pauseContentColor = if (state.isPaused) Color.White else TextPrimary
+                
                 Button(
                     onClick = {
                         doHaptic()
                         if (state.isPaused) viewModel.resumeTimer() else viewModel.pauseTimer()
                     },
-                    modifier = Modifier.weight(1f).height(50.dp),
+                    modifier = Modifier.weight(1f).height(60.dp),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (state.isPaused) StatusOrange else Surface3)
+                    colors = ButtonDefaults.buttonColors(containerColor = pauseBgColor),
+                    contentPadding = PaddingValues(0.dp)
                 ) {
-                    Icon(
-                        if (state.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                        null,
-                        Modifier.size(18.dp),
-                        tint = if (state.isPaused) Color.White else TextPrimary
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        if (state.isPaused) "Resume" else "Pause",
-                        fontWeight = FontWeight.Bold,
-                        color = if (state.isPaused) Color.White else TextPrimary,
-                        fontSize = 13.sp
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        AnimatedContent(targetState = state.isPaused, label = "pauseIcon") { paused ->
+                            Icon(
+                                if (paused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                                null,
+                                Modifier.size(20.dp),
+                                tint = pauseContentColor
+                            )
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            if (state.isPaused) "Resume" else "Pause",
+                            fontWeight = FontWeight.Bold,
+                            color = pauseContentColor,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
 
                 Button(
@@ -178,32 +200,53 @@ fun HomeScreen(
                         doHaptic()
                         viewModel.extendTimer()
                     },
-                    modifier = Modifier.weight(1f).height(50.dp),
+                    modifier = Modifier.weight(1f).height(60.dp),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentPurple)
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentPurple),
+                    contentPadding = PaddingValues(0.dp)
                 ) {
-                    Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Extend", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.Add, null, Modifier.size(20.dp))
+                        Spacer(Modifier.height(2.dp))
+                        Text("+10m", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
             // Active Sleep Protection Details Card
             Card(
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = Surface2),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, StatusGreen.copy(alpha = 0.3f), RoundedCornerShape(18.dp))
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        val infiniteTransition = rememberInfiniteTransition(label = "pulseGreen")
+                        val scale by infiniteTransition.animateFloat(
+                            initialValue = 1f,
+                            targetValue = 1.3f,
+                            animationSpec = infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse),
+                            label = "scale"
+                        )
+                        val alpha by infiniteTransition.animateFloat(
+                            initialValue = 1f,
+                            targetValue = 0.5f,
+                            animationSpec = infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse),
+                            label = "alpha"
+                        )
+                        
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
+                                .scale(scale)
+                                .graphicsLayer { this.alpha = alpha }
                                 .background(StatusGreen, CircleShape)
                         )
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(10.dp))
                         Text(
                             "Sleep Protection Running",
                             style = MaterialTheme.typography.labelLarge,
@@ -212,14 +255,16 @@ fun HomeScreen(
                         )
                     }
 
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider(color = Surface3, thickness = 1.dp)
+                    Spacer(Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
                             val activeDev = state.connectedDevices.firstOrNull()
                             val devIcon = if (activeDev?.type == com.smartbluetoothsleeptracker.data.db.DeviceType.WIRED_HEADPHONES) Icons.Rounded.Headphones else Icons.Rounded.Bluetooth
                             Icon(devIcon, null, tint = AccentBlue, modifier = Modifier.size(16.dp))
@@ -228,19 +273,28 @@ fun HomeScreen(
                                 activeDev?.name ?: "Connected Device",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
+                        
+                        Spacer(Modifier.width(16.dp))
 
-                        Text(
-                            if (state.settings.playbackStopEnabled) "${state.settings.fadeOutDurationSeconds}s fade" else "No fade",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.AutoMirrored.Rounded.VolumeDown, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                if (state.settings.playbackStopEnabled) "${state.settings.fadeOutDurationSeconds}s fade" else "No fade",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary,
+                                textAlign = TextAlign.End
+                            )
+                        }
                     }
                 }
             }
-        } else {
+                } else {
             // ── IDLE DIAL VIEW ──
             RotaryDial(
                 minutes = state.selectedMinutes,
@@ -445,6 +499,8 @@ fun HomeScreen(
                     textAlign = TextAlign.Center
                 )
             }
+                }
+            }
         }
 
         Spacer(Modifier.height(32.dp))
@@ -474,30 +530,55 @@ private fun ConnectionStatusBar(
             !btEnabled -> StatusRed
             else -> TextTertiary
         }
-        Box(Modifier.size(10.dp).background(dotColor, CircleShape))
+        val animatedDotColor by animateColorAsState(dotColor, label = "dotColor")
+
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val isPulsing = devices.isNotEmpty() && !cooldownActive
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = if (isPulsing) 1.3f else 1f,
+            animationSpec = if (isPulsing) infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse) else snap(),
+            label = "pulseScale"
+        )
+        val alpha by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = if (isPulsing) 0.5f else 1f,
+            animationSpec = if (isPulsing) infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse) else snap(),
+            label = "pulseAlpha"
+        )
+
+        Box(Modifier.size(10.dp).scale(scale).graphicsLayer { this.alpha = alpha }.background(animatedDotColor, CircleShape))
 
         Spacer(Modifier.width(12.dp))
 
-        Column(Modifier.weight(1f)) {
-            when {
-                cooldownActive -> {
-                    Text("Cooldown Active", style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold, color = StatusOrange)
-                }
-                devices.isNotEmpty() -> {
-                    val primary = devices.firstOrNull { it.isFavorite } ?: devices.first()
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            primary.name,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
+        AnimatedContent(
+            targetState = Triple(cooldownActive, devices, btEnabled),
+            label = "StatusText",
+            modifier = Modifier.weight(1f)
+        ) { target ->
+            val cdActive = target.first
+            val devs = target.second
+            val btOn = target.third
+            Column {
+                when {
+                    cdActive -> {
+                        Text("Cooldown Active", style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold, color = StatusOrange)
+                    }
+                    devs.isNotEmpty() -> {
+                        val primary = devs.firstOrNull { it.isFavorite } ?: devs.first()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                primary.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
                             text = if (isDisconnectReady) "Ready" else "Unverified",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isDisconnectReady) StatusGreen else StatusOrange,
@@ -511,15 +592,15 @@ private fun ConnectionStatusBar(
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
-                    if (devices.size > 1) {
+                    if (devs.size > 1) {
                         Text(
-                            "+${devices.size - 1} more",
+                            "+${devs.size - 1} more",
                             style = MaterialTheme.typography.labelSmall,
                             color = TextSecondary
                         )
                     }
                 }
-                !btEnabled -> {
+                !btOn -> {
                     Text("Bluetooth Off", style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold, color = StatusRed)
                 }
@@ -529,6 +610,7 @@ private fun ConnectionStatusBar(
                 }
             }
         }
+    }
 
         // Favorite indicator for primary device
         if (devices.isNotEmpty()) {
@@ -842,6 +924,15 @@ private fun CountdownDisplay(remainingMs: Long, totalDurationMs: Long) {
     val progressFraction = if (totalDurationMs > 0) {
         (remainingMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f)
     } else 1f
+    
+    val animatedProgress by animateFloatAsState(
+        targetValue = progressFraction,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "progress"
+    )
+    
+    val isFinalMinute = remainingMs <= 60_000L
+    val gradientColors = if (isFinalMinute) listOf(StatusOrange, StatusRed) else listOf(AccentBlue, AccentCyan, AccentPurple)
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         Box(
@@ -855,18 +946,32 @@ private fun CountdownDisplay(remainingMs: Long, totalDurationMs: Long) {
                 Modifier.fillMaxSize().drawWithCache {
                     val strokeWidth = 16.dp.toPx()
                     val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                    val blurStroke = Stroke(width = strokeWidth * 1.8f, cap = StrokeCap.Round)
                     val inset = strokeWidth / 2f
                     val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
                     val topLeft = Offset(inset, inset)
                     onDrawBehind {
                         // Gray background track
                         drawArc(Surface3, 0f, 360f, false, topLeft, arcSize, style = stroke)
-                        // Active colored sweep matching RotaryDial's styling (AccentBlue, AccentCyan, AccentPurple)
-                        if (progressFraction > 0f) {
+                        // Active colored sweep
+                        if (animatedProgress > 0f) {
+                            val sweepBrush = Brush.sweepGradient(gradientColors)
+                            // Outer glow
                             drawArc(
-                                brush = Brush.sweepGradient(listOf(AccentBlue, AccentCyan, AccentPurple)),
-                                startAngle = -90f, // start from the top
-                                sweepAngle = progressFraction * 360f,
+                                brush = sweepBrush,
+                                startAngle = -90f,
+                                sweepAngle = animatedProgress * 360f,
+                                useCenter = false,
+                                topLeft = topLeft,
+                                size = arcSize,
+                                style = blurStroke,
+                                alpha = 0.25f
+                            )
+                            // Main arc
+                            drawArc(
+                                brush = sweepBrush,
+                                startAngle = -90f,
+                                sweepAngle = animatedProgress * 360f,
                                 useCenter = false,
                                 topLeft = topLeft,
                                 size = arcSize,
@@ -881,10 +986,10 @@ private fun CountdownDisplay(remainingMs: Long, totalDurationMs: Long) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = if (h > 0) String.format(java.util.Locale.ROOT, "%d:%02d:%02d", h, m, s) else String.format(java.util.Locale.ROOT, "%d:%02d", m, s),
-                    style = MaterialTheme.typography.displayLarge,
+                    style = MaterialTheme.typography.displayLarge.copy(fontFeatureSettings = "tnum"),
                     fontWeight = FontWeight.Black,
                     color = TextPrimary,
-                    fontSize = if (h > 0) 42.sp else 52.sp
+                    fontSize = 48.sp
                 )
                 Spacer(Modifier.height(4.dp))
                 Text("remaining", style = MaterialTheme.typography.labelMedium, color = TextSecondary)

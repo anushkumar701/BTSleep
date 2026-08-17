@@ -1,0 +1,11 @@
+Drop box contents: 4 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+
+2026-08-16 18:51:47 system_app_anr (compressed text, 10198 bytes)
+2026-08-16 18:51:54 SYSTEM_BOOT (text, 521 bytes)
+2026-08-16 18:51:54 SYSTEM_LAST_KMSG (text, 4642 bytes)
+2026-08-16 18:51:54 SYSTEM_AUDIT (text, 521 bytes)
+
+Usage: dumpsys dropbox [--print|--file] [YYYY-mm-dd] [HH:MM:SS] [tag]
