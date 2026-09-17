@@ -80,3 +80,7 @@ Thumbs.db
 
 # Web Simulator (Ignore completely - push core Android app only)
 web-simulator/
+
+# Security scan artifacts
+*.sarif
+findings.sarif

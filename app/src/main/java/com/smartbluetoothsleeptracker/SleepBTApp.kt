@@ -17,6 +17,7 @@ class SleepBTApp : Application() {
     lateinit var btMonitor: BluetoothMonitor
     lateinit var playbackController: PlaybackController
     lateinit var screenController: ScreenController
+    val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
@@ -29,6 +30,7 @@ class SleepBTApp : Application() {
         screenController = ScreenController(this)
 
         AppNotifications.createChannels(this)
+        com.smartbluetoothsleeptracker.core.haptics.HapticManager.init(this)
 
         // Wire up cooldown enforcement: when a device reconnects, check if it should be blocked
         btMonitor.onDeviceConnected = { device ->

@@ -1,5 +1,6 @@
 package com.smartbluetoothsleeptracker.ui.screens
 
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -7,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -145,12 +147,28 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                var isPressing by remember { mutableStateOf(false) }
+                val cancelScale by animateFloatAsState(if (isPressing) 0.95f else 1f)
+
                 OutlinedButton(
-                    onClick = {
-                        doHaptic()
-                        viewModel.cancelTimer()
-                    },
-                    modifier = Modifier.weight(1f).height(60.dp),
+                    onClick = { /* Do nothing on normal click, maybe show toast */ },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(60.dp)
+                        .scale(cancelScale)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = {
+                                    isPressing = true
+                                    tryAwaitRelease()
+                                    isPressing = false
+                                },
+                                onLongPress = {
+                                    doHaptic()
+                                    viewModel.cancelTimer()
+                                }
+                            )
+                        },
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
                     border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
@@ -159,7 +177,7 @@ fun HomeScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Rounded.Close, null, Modifier.size(20.dp))
                         Spacer(Modifier.height(2.dp))
-                        Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text("Hold Cancel", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
 
@@ -537,13 +555,13 @@ private fun ConnectionStatusBar(
         val scale by infiniteTransition.animateFloat(
             initialValue = 1f,
             targetValue = if (isPulsing) 1.3f else 1f,
-            animationSpec = if (isPulsing) infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse) else snap(),
+            animationSpec = infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse),
             label = "pulseScale"
         )
         val alpha by infiniteTransition.animateFloat(
             initialValue = 1f,
             targetValue = if (isPulsing) 0.5f else 1f,
-            animationSpec = if (isPulsing) infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse) else snap(),
+            animationSpec = infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse),
             label = "pulseAlpha"
         )
 

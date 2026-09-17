@@ -12,6 +12,7 @@ import com.smartbluetoothsleeptracker.data.db.DeviceEntity
 import com.smartbluetoothsleeptracker.data.db.DeviceType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlin.coroutines.resume
 
 data class ConnectedDevice(
     val address: String,
@@ -83,8 +84,7 @@ class BluetoothMonitor(
                     scope.launch { refreshConnectedDevices() }
                     onDeviceDisconnected?.invoke(device)
                 }
-                Intent.ACTION_HEADSET_PLUG,
-                android.media.AudioManager.ACTION_HEADSET_PLUG -> {
+                Intent.ACTION_HEADSET_PLUG -> {
                     scope.launch { refreshConnectedDevices() }
                 }
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
@@ -121,6 +121,7 @@ class BluetoothMonitor(
 
     fun stop() {
         runCatching { context.unregisterReceiver(receiver) }
+        scope.cancel()
     }
 
     @SuppressLint("MissingPermission")
@@ -143,18 +144,20 @@ class BluetoothMonitor(
         val ad = adapter
         if (ad != null && ad.isEnabled) {
             runCatching {
+                val (a2dpDevices, headsetDevices) = coroutineScope {
+                    val a2dpDef = async { getProfileDevices(ad, BluetoothProfile.A2DP) }
+                    val headsetDef = async { getProfileDevices(ad, BluetoothProfile.HEADSET) }
+                    Pair(a2dpDef.await(), headsetDef.await())
+                }
+                val profileConnected = (a2dpDevices + headsetDevices).map { it.address }.toSet()
+
                 val bonded = ad.bondedDevices ?: emptySet()
 
                 bonded.forEach { device ->
-                    val reflectConn = try {
-                        val method = device.javaClass.getMethod("isConnected")
-                        method.isAccessible = true
-                        method.invoke(device) as? Boolean ?: false
-                    } catch (_: Exception) { false }
-
                     val aclConn = aclConnectedAddresses.contains(device.address)
+                    val profConn = profileConnected.contains(device.address)
 
-                    val isConn = aclConn || reflectConn
+                    val isConn = aclConn || profConn
 
                     if (isConn) {
                         com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(
@@ -176,6 +179,24 @@ class BluetoothMonitor(
         }
 
         _connectedDevices.value = connected.distinctBy { it.address }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun getProfileDevices(adapter: BluetoothAdapter, profile: Int): List<BluetoothDevice> = suspendCancellableCoroutine { cont ->
+        val listener = object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(p: Int, proxy: BluetoothProfile) {
+                val devs = try { proxy.connectedDevices } catch (e: Exception) { emptyList() }
+                runCatching { adapter.closeProfileProxy(p, proxy) }
+                if (cont.isActive) cont.resume(devs)
+            }
+            override fun onServiceDisconnected(p: Int) {
+                if (cont.isActive) cont.resume(emptyList())
+            }
+        }
+        val bound = runCatching { adapter.getProfileProxy(context, listener, profile) }.getOrDefault(false)
+        if (!bound && cont.isActive) {
+            cont.resume(emptyList())
+        }
     }
 
     @SuppressLint("MissingPermission")

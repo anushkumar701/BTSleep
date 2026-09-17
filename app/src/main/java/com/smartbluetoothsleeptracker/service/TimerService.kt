@@ -20,6 +20,7 @@ import com.smartbluetoothsleeptracker.core.notification.AppNotifications
 import com.smartbluetoothsleeptracker.core.playback.FadeResult
 import com.smartbluetoothsleeptracker.data.db.DailyUsageEntity
 import com.smartbluetoothsleeptracker.data.db.SessionEntity
+import com.smartbluetoothsleeptracker.core.sensor.ShakeDetector
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.time.LocalDate
@@ -39,6 +40,10 @@ class TimerService : Service() {
 
         const val EXTRA_MINUTES = "minutes"
         const val EXTRA_TARGETS = "targets" // comma-separated MAC addresses
+
+        @Volatile
+        var isRunning: Boolean = false
+            private set
 
         fun startIntent(ctx: Context, minutes: Int, targets: String): Intent =
             Intent(ctx, TimerService::class.java).apply {
@@ -68,6 +73,15 @@ class TimerService : Service() {
     private var warningFired = false
 
     private val app get() = application as SleepBTApp
+    private var shakeDetector: ShakeDetector? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        shakeDetector = ShakeDetector(this) {
+            Log.i(TAG, "Shake gesture detected during warning! Extending timer")
+            extendTimer()
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -90,6 +104,7 @@ class TimerService : Service() {
     }
 
     private fun startTimer(minutes: Int, targets: String) {
+        isRunning = true
         plannedMinutes = minutes
         extendedMinutes = 0
         targetAddresses = targets.split(",").filter { it.isNotBlank() }
@@ -103,7 +118,11 @@ class TimerService : Service() {
         acquireWakeLock(minutes)
 
         // Start foreground
-        val notif = AppNotifications.timerNotification(this, formatRemaining()).build()
+        val notif = AppNotifications.timerNotification(
+            this, formatRemaining(),
+            isPaused = false,
+            endTimeMillis = endTimeMillis
+        ).build()
         ServiceCompat.startForeground(
             this, AppNotifications.NOTIF_TIMER, notif,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
@@ -148,7 +167,7 @@ class TimerService : Service() {
         val nm = getSystemService(android.app.NotificationManager::class.java)
         nm.notify(
             AppNotifications.NOTIF_TIMER,
-            AppNotifications.timerNotification(this, "Paused").build()
+            AppNotifications.timerNotification(this, "Paused", isPaused = true, endTimeMillis = 0L).build()
         )
 
         // Auto-resume after 2 hours (120 minutes) if paused continuously
@@ -185,53 +204,57 @@ class TimerService : Service() {
     private fun startTickLoop() {
         tickJob?.cancel()
         tickJob = scope.launch {
+            var tickCount = 0
             while (isActive && !isPaused) {
                 val remaining = endTimeMillis - System.currentTimeMillis()
 
                 if (remaining <= 0) {
-                    // Cancel the timer notification immediately — never show 0:00
                     val nm = getSystemService(android.app.NotificationManager::class.java)
                     nm.cancel(AppNotifications.NOTIF_TIMER)
-                    @Suppress("DEPRECATION")
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    onTimerExpired()
+                    ServiceCompat.stopForeground(this@TimerService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                    onTimerExpired(fromUserEndNow = false)
                     return@launch
                 }
 
-                // Check warning notification threshold
                 val settings = app.prefs.settings.first()
                 val nm = getSystemService(android.app.NotificationManager::class.java)
 
+                var justFiredWarning = false
                 if (settings.sleepAlertsEnabled && !warningFired) {
-                    // Cap warning to at most half the planned duration
-                    // so a 2-min timer with warningLeadMinutes=2 doesn't fire instantly
                     val plannedMs = plannedMinutes * 60_000L
                     val rawWarningMs = settings.warningLeadMinutes * 60_000L
                     val warningMs = minOf(rawWarningMs, plannedMs / 2)
                     if (remaining <= warningMs && warningMs > 0) {
                         warningFired = true
-                        // Merge warning into the timer notification — NO separate notification
+                        justFiredWarning = true
+                        shakeDetector?.startListening()
                         nm.notify(
                             AppNotifications.NOTIF_TIMER,
                             AppNotifications.timerNotification(
                                 this@TimerService,
                                 formatRemaining(),
-                                warningText = "⚠ ${settings.warningLeadMinutes}m left — BT will disconnect"
+                                warningText = "⚠ ${settings.warningLeadMinutes}m left — BT will disconnect (Shake to extend)",
+                                isPaused = false,
+                                endTimeMillis = endTimeMillis
                             ).build()
                         )
                         HapticManager.vibrateWarning(this@TimerService)
-                    } else {
-                        // Normal tick update
-                        nm.notify(
-                            AppNotifications.NOTIF_TIMER,
-                            AppNotifications.timerNotification(this@TimerService, formatRemaining()).build()
-                        )
                     }
-                } else {
-                    // Normal tick update
+                }
+
+                // Throttle notification updates: chronometer animates natively on lockscreen/shade,
+                // so we only update every 5 seconds (or immediately when warning triggers) to prevent GC churn
+                if (justFiredWarning || (tickCount % 5 == 0)) {
+                    val warnText = if (warningFired) "⚠ ${settings.warningLeadMinutes}m left — BT will disconnect" else null
                     nm.notify(
                         AppNotifications.NOTIF_TIMER,
-                        AppNotifications.timerNotification(this@TimerService, formatRemaining()).build()
+                        AppNotifications.timerNotification(
+                            this@TimerService,
+                            formatRemaining(),
+                            warningText = warnText,
+                            isPaused = false,
+                            endTimeMillis = endTimeMillis
+                        ).build()
                     )
                 }
 
@@ -242,6 +265,7 @@ class TimerService : Service() {
                 }
                 sendBroadcast(tickIntent)
 
+                tickCount++
                 delay(1000)
             }
         }
@@ -254,8 +278,8 @@ class TimerService : Service() {
      * 3. Screen off
      */
     @SuppressLint("MissingPermission")
-    private fun onTimerExpired() {
-        Log.i(TAG, "Timer expired — executing expiry sequence")
+    private fun onTimerExpired(fromUserEndNow: Boolean = false) {
+        Log.i(TAG, "Timer expired — executing expiry sequence (fromUserEndNow=$fromUserEndNow)")
 
         scope.launch {
             try {
@@ -263,6 +287,24 @@ class TimerService : Service() {
                 nm.cancel(AppNotifications.NOTIF_TIMER)
 
                 val settings = app.prefs.settings.first()
+
+                // Auto-extend if music is still active on normal expiry (up to 30 min max extension)
+                if (!fromUserEndNow && app.playbackController.isMusicActive() && extendedMinutes < 30) {
+                    Log.i(TAG, "Music is still active on timer expiry! Auto-extending by ${settings.extendMinutes}m")
+                    performExtend()
+                    nm.notify(
+                        AppNotifications.NOTIF_TIMER,
+                        AppNotifications.timerNotification(
+                            this@TimerService,
+                            formatRemaining(),
+                            warningText = "Music active • Auto-extended +${settings.extendMinutes}m",
+                            isPaused = false,
+                            endTimeMillis = endTimeMillis
+                        ).build()
+                    )
+                    HapticManager.vibrateExtend(this@TimerService)
+                    return@launch
+                }
 
                 // ── STEP 1: Playback Stop (volume fade) ────────────────────
                 if (settings.playbackStopEnabled) {
@@ -330,7 +372,7 @@ class TimerService : Service() {
                         date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                     )
                 )
-                app.db.sessionDao().pruneOldSessions(10)
+                app.db.sessionDao().pruneOldSessions(500)
 
                 val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                 for (addr in targetAddresses) {
@@ -377,16 +419,54 @@ class TimerService : Service() {
                 app.prefs.clearTimer()
             } finally {
                 releaseWakeLock()
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                app.playbackController.abandonAudioFocus()
+                ServiceCompat.stopForeground(this@TimerService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 sendBroadcast(Intent("com.sleepbt.TIMER_END").setPackage(packageName))
             }
         }
     }
 
     private fun cancelTimer() {
+        Log.i(TAG, "Cancelling timer — stopping countdown without disconnecting devices")
+        isRunning = false
         tickJob?.cancel()
         autoResumeJob?.cancel()
-        onTimerExpired()
+        cooldownTickJob?.cancel()
+
+        scope.launch {
+            if (sessionId > 0L) {
+                val startTime = if (sessionStartTime > 0L) sessionStartTime else (endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L)
+                val totalActiveMs = (System.currentTimeMillis() - startTime - totalPausedMs).coerceAtLeast(0)
+                val actualMin = (totalActiveMs / 60_000L).toInt().coerceAtLeast(1)
+                app.db.sessionDao().upsert(
+                    SessionEntity(
+                        id = sessionId,
+                        deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
+                        deviceName = getDeviceName(targetAddresses.firstOrNull()),
+                        startTime = startTime,
+                        endTime = System.currentTimeMillis(),
+                        plannedDurationMin = plannedMinutes,
+                        actualDurationMin = actualMin,
+                        disconnectConfirmed = false,
+                        extendedMinutes = extendedMinutes,
+                        date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    )
+                )
+            }
+            app.prefs.clearTimer()
+        }
+
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        nm.cancel(AppNotifications.NOTIF_TIMER)
+        nm.cancel(AppNotifications.NOTIF_WARNING)
+        shakeDetector?.stopListening()
+
+        HapticManager.vibrateClick(this)
+
+        releaseWakeLock()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        sendBroadcast(Intent("com.sleepbt.TIMER_END").setPackage(packageName))
+        stopSelf()
     }
 
     private fun extendTimer() {
@@ -397,6 +477,7 @@ class TimerService : Service() {
     }
 
     private suspend fun performExtend() {
+        shakeDetector?.stopListening()
         val settings = app.prefs.settings.first()
         val addMs = settings.extendMinutes * 60_000L
         endTimeMillis += addMs
@@ -421,9 +502,10 @@ class TimerService : Service() {
     }
 
     private fun endNow() {
+        Log.i(TAG, "Ending timer now — triggering disconnect sequence immediately")
         tickJob?.cancel()
         autoResumeJob?.cancel()
-        onTimerExpired()
+        onTimerExpired(fromUserEndNow = true)
     }
 
     private fun allowReconnect() {
@@ -488,9 +570,12 @@ class TimerService : Service() {
     }
 
     override fun onDestroy() {
+        isRunning = false
         tickJob?.cancel()
         cooldownTickJob?.cancel()
         autoResumeJob?.cancel()
+        shakeDetector?.stopListening()
+        shakeDetector = null
         app.disconnector.endCooldown()
         releaseWakeLock()
         scope.cancel()

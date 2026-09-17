@@ -7,13 +7,29 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import com.smartbluetoothsleeptracker.SleepBTApp
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 
 /**
  * Manages distinct, non-jarring haptic vibration patterns for timer lifecycle events.
  * Respects the user's hapticFeedbackEnabled preference.
  */
 object HapticManager {
+
+    @Volatile
+    private var isEnabledCached = true
+
+    private var isInitialized = false
+
+    fun init(context: Context) {
+        if (isInitialized) return
+        isInitialized = true
+        val app = context.applicationContext as? SleepBTApp ?: return
+        app.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            app.prefs.settings.collect { settings ->
+                isEnabledCached = settings.hapticFeedbackEnabled
+            }
+        }
+    }
 
     private fun getVibrator(context: Context): Vibrator? {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -25,23 +41,13 @@ object HapticManager {
         }
     }
 
-    private suspend fun isHapticsEnabled(context: Context): Boolean {
-        val app = context.applicationContext as? SleepBTApp ?: return true
-        return app.prefs.settings.first().hapticFeedbackEnabled
-    }
-
     /**
      * Warning pulse: two short gentle pulses (50ms pulse, 50ms pause, 50ms pulse).
      */
     fun vibrateWarning(context: Context) {
+        if (!isEnabledCached) return
         val vibrator = getVibrator(context) ?: return
         if (!vibrator.hasVibrator()) return
-
-        val app = context.applicationContext as? SleepBTApp
-        if (app != null) {
-            val enabled = runBlocking { isHapticsEnabled(context) }
-            if (!enabled) return
-        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val timings = longArrayOf(0, 50, 50, 50)
@@ -57,14 +63,9 @@ object HapticManager {
      * Extend pulse: one short pulse (40ms).
      */
     fun vibrateExtend(context: Context) {
+        if (!isEnabledCached) return
         val vibrator = getVibrator(context) ?: return
         if (!vibrator.hasVibrator()) return
-
-        val app = context.applicationContext as? SleepBTApp
-        if (app != null) {
-            val enabled = runBlocking { isHapticsEnabled(context) }
-            if (!enabled) return
-        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             vibrator.vibrate(VibrationEffect.createOneShot(40L, VibrationEffect.DEFAULT_AMPLITUDE))
@@ -78,14 +79,9 @@ object HapticManager {
      * Disconnected pulse: one gentle longer pulse (150ms).
      */
     fun vibrateDisconnected(context: Context) {
+        if (!isEnabledCached) return
         val vibrator = getVibrator(context) ?: return
         if (!vibrator.hasVibrator()) return
-
-        val app = context.applicationContext as? SleepBTApp
-        if (app != null) {
-            val enabled = runBlocking { isHapticsEnabled(context) }
-            if (!enabled) return
-        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             vibrator.vibrate(VibrationEffect.createOneShot(150L, VibrationEffect.DEFAULT_AMPLITUDE))
@@ -99,14 +95,9 @@ object HapticManager {
      * Dial tick pulse: crisp tick for minute-by-minute rotary dial adjustments.
      */
     fun vibrateTick(context: Context) {
+        if (!isEnabledCached) return
         val vibrator = getVibrator(context) ?: return
         if (!vibrator.hasVibrator()) return
-
-        val app = context.applicationContext as? SleepBTApp
-        if (app != null) {
-            val enabled = runBlocking { isHapticsEnabled(context) }
-            if (!enabled) return
-        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
@@ -115,6 +106,24 @@ object HapticManager {
         } else {
             @Suppress("DEPRECATION")
             vibrator.vibrate(15L)
+        }
+    }
+
+    /**
+     * Click pulse: crisp feedback for button presses.
+     */
+    fun vibrateClick(context: Context) {
+        if (!isEnabledCached) return
+        val vibrator = getVibrator(context) ?: return
+        if (!vibrator.hasVibrator()) return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(20L, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(20L)
         }
     }
 }

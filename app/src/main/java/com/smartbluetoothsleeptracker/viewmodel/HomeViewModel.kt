@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.smartbluetoothsleeptracker.SleepBTApp
 import com.smartbluetoothsleeptracker.core.bluetooth.ConnectedDevice
 import com.smartbluetoothsleeptracker.core.bluetooth.CooldownState
+import com.smartbluetoothsleeptracker.core.haptics.HapticManager
 import com.smartbluetoothsleeptracker.data.prefs.AppSettings
 import com.smartbluetoothsleeptracker.service.TimerService
 import kotlinx.coroutines.*
@@ -71,13 +72,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             app.prefs.settings.collect { settings ->
                 val paused = settings.timerPausedRemaining != null
+                val endClock = settings.timerEndWallClock
+                val now = System.currentTimeMillis()
+
+                // If end time is in the past and not paused, clear stale state
+                if (endClock != null && endClock <= now && !paused) {
+                    app.prefs.clearTimer()
+                    return@collect
+                }
+
                 _state.update { it.copy(
                     settings = settings,
                     selectedMinutes = settings.selectedMinutes,
                     lastUsedPreset = settings.lastUsedPreset,
-                    isTimerRunning = (settings.timerEndWallClock != null && settings.timerEndWallClock > System.currentTimeMillis()) || paused,
+                    isTimerRunning = (endClock != null && endClock > now) || paused,
                     isPaused = paused,
-                    remainingMs = settings.timerPausedRemaining ?: (settings.timerEndWallClock?.minus(System.currentTimeMillis())?.coerceAtLeast(0L) ?: 0L)
+                    remainingMs = settings.timerPausedRemaining ?: (endClock?.minus(now)?.coerceAtLeast(0L) ?: 0L)
                 ) }
             }
         }
@@ -218,6 +228,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             .joinToString(",")
 
         if (targets.isBlank()) {
+            HapticManager.vibrateWarning(getApplication())
             // Show user-facing feedback instead of silent no-op
             android.widget.Toast.makeText(
                 getApplication(),

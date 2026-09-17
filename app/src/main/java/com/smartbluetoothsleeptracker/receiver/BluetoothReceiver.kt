@@ -17,6 +17,7 @@ import com.smartbluetoothsleeptracker.data.db.SessionEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlin.coroutines.resume
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -151,7 +152,7 @@ class BluetoothReceiver : BroadcastReceiver() {
                                         date = today
                                     )
                                 )
-                                app.db.sessionDao().pruneOldSessions(10)
+                                app.db.sessionDao().pruneOldSessions(500)
 
                                 val existingUsage = app.db.dailyUsageDao().getForDate(today)
                                     .find { it.deviceAddress == address }
@@ -183,10 +184,12 @@ class BluetoothReceiver : BroadcastReceiver() {
                     val pendingResult = goAsync()
                     CoroutineScope(Dispatchers.IO).launch {
                         try {
+                            val a2dpDevices = getProfileDevices(context, adapter, android.bluetooth.BluetoothProfile.A2DP)
+                            val headsetDevices = getProfileDevices(context, adapter, android.bluetooth.BluetoothProfile.HEADSET)
+                            val profileConnected = (a2dpDevices + headsetDevices).map { it.address }.toSet()
+
                             adapter.bondedDevices?.forEach { dev ->
-                                val isConn = try {
-                                    dev.javaClass.getMethod("isConnected").invoke(dev) as? Boolean ?: false
-                                } catch (_: Exception) { false }
+                                val isConn = profileConnected.contains(dev.address)
 
                                 if (isConn) {
                                     if (!prefs.contains("$KEY_PREFIX_START${dev.address}")) {
@@ -235,6 +238,24 @@ class BluetoothReceiver : BroadcastReceiver() {
             BluetoothClass.Device.Major.COMPUTER -> DeviceType.PC
             BluetoothClass.Device.Major.WEARABLE -> DeviceType.SMARTWATCH
             else -> DeviceType.OTHER
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun getProfileDevices(context: Context, adapter: BluetoothAdapter, profile: Int): List<BluetoothDevice> = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        val listener = object : android.bluetooth.BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(p: Int, proxy: android.bluetooth.BluetoothProfile) {
+                val devs = try { proxy.connectedDevices } catch (e: Exception) { emptyList() }
+                runCatching { adapter.closeProfileProxy(p, proxy) }
+                if (cont.isActive) cont.resume(devs)
+            }
+            override fun onServiceDisconnected(p: Int) {
+                if (cont.isActive) cont.resume(emptyList())
+            }
+        }
+        val bound = runCatching { adapter.getProfileProxy(context, listener, profile) }.getOrDefault(false)
+        if (!bound && cont.isActive) {
+            cont.resume(emptyList())
         }
     }
 }

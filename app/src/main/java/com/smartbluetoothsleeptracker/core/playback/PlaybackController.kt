@@ -137,6 +137,22 @@ class PlaybackController(private val context: Context) {
         }
     }
 
+    private var currentFocusRequest: AudioFocusRequest? = null
+
+    fun isMusicActive(): Boolean = audioManager.isMusicActive
+
+    fun abandonAudioFocus() {
+        currentFocusRequest?.let { req ->
+            try {
+                audioManager.abandonAudioFocusRequest(req)
+                Log.d(TAG, "Audio focus abandoned successfully")
+            } catch (e: Exception) {
+                Log.w(TAG, "abandonAudioFocus failed: ${e.message}")
+            }
+            currentFocusRequest = null
+        }
+    }
+
     private fun stealAudioFocusAndPause() {
         try {
             val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -149,7 +165,8 @@ class PlaybackController(private val context: Context) {
                 .setOnAudioFocusChangeListener { /* no-op */ }
                 .build()
             audioManager.requestAudioFocus(focusRequest)
-            Log.d(TAG, "Audio focus stolen successfully")
+            currentFocusRequest = focusRequest
+            Log.d(TAG, "Audio focus requested successfully")
         } catch (e: Exception) {
             Log.w(TAG, "AudioFocus request failed: ${e.message}")
         }

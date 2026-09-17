@@ -31,9 +31,14 @@ class WiredHeadsetReceiver : BroadcastReceiver() {
 
         fun isWiredConnected(context: Context): Boolean {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            val plugTime = getWiredConnectTime(context)
             val isPlugged = audioManager?.isWiredHeadsetOn == true
-            return isPlugged || plugTime > 0L
+            if (!isPlugged) {
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                if (prefs.contains(KEY_START_TIME)) {
+                    prefs.edit().remove(KEY_START_TIME).apply()
+                }
+            }
+            return isPlugged
         }
     }
 
@@ -109,7 +114,7 @@ class WiredHeadsetReceiver : BroadcastReceiver() {
                                         date = today
                                     )
                                 )
-                                app.db.sessionDao().pruneOldSessions(10)
+                                app.db.sessionDao().pruneOldSessions(500)
 
                                 val existingUsage = app.db.dailyUsageDao().getForDate(today)
                                     .find { it.deviceAddress == WIRED_ADDRESS }

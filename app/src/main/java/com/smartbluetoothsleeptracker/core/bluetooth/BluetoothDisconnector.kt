@@ -71,6 +71,13 @@ class BluetoothDisconnector(
     val isCooldownActive: Boolean
         get() = _cooldownState.value.active && System.currentTimeMillis() < _cooldownState.value.expiresAt
 
+    fun destroy() {
+        scope.cancel()
+        cooldownJob?.cancel()
+        activeEnforcements.values.forEach { it.cancel() }
+        activeEnforcements.clear()
+    }
+
     @SuppressLint("MissingPermission")
     suspend fun probeWorkingMethodSilently(device: BluetoothDevice): String? {
         // Return the already-working cached method if present (populated by a real successful disconnect).
@@ -108,8 +115,10 @@ class BluetoothDisconnector(
             )
         }
 
-        val success = if (devices.isNotEmpty()) true else anySuccess
-        return DisconnectResult(success, lastMethod ?: "profile_disconnect", allTried)
+        // Only report success when at least one device was actually confirmed disconnected —
+        // previously this always returned true whenever the target list was non-empty,
+        // so the app claimed success even when every disconnect method failed.
+        return DisconnectResult(anySuccess, lastMethod, allTried)
     }
 
     @SuppressLint("MissingPermission")
@@ -389,13 +398,13 @@ class BluetoothDisconnector(
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun isDeviceConnectedViaProfiles(device: BluetoothDevice): Boolean {
-        val a2dpConnected = isDeviceConnectedViaProfileType(BluetoothProfile.A2DP, device)
-        val hfpConnected = isDeviceConnectedViaProfileType(BluetoothProfile.HEADSET, device)
-        val leAudioConnected = if (Build.VERSION.SDK_INT >= 33) {
-            isDeviceConnectedViaProfileType(22 /* BluetoothProfile.LE_AUDIO */, device)
-        } else false
-        return a2dpConnected || hfpConnected || leAudioConnected
+    private suspend fun isDeviceConnectedViaProfiles(device: BluetoothDevice): Boolean = coroutineScope {
+        val a2dpDeferred = async { isDeviceConnectedViaProfileType(BluetoothProfile.A2DP, device) }
+        val hfpDeferred = async { isDeviceConnectedViaProfileType(BluetoothProfile.HEADSET, device) }
+        val leAudioDeferred = if (Build.VERSION.SDK_INT >= 33) {
+            async { isDeviceConnectedViaProfileType(22 /* BluetoothProfile.LE_AUDIO */, device) }
+        } else null
+        a2dpDeferred.await() || hfpDeferred.await() || (leAudioDeferred?.await() == true)
     }
 
     @SuppressLint("MissingPermission")

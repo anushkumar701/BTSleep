@@ -49,7 +49,9 @@ object AppNotifications {
     fun timerNotification(
         ctx: Context,
         remainingText: String,
-        warningText: String? = null
+        warningText: String? = null,
+        isPaused: Boolean = false,
+        endTimeMillis: Long = 0L
     ): NotificationCompat.Builder {
         val cancelIntent = PendingIntent.getService(
             ctx, 100,
@@ -61,16 +63,38 @@ object AppNotifications {
             Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_EXTEND),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val pauseResumeIntent = PendingIntent.getService(
+            ctx, 102,
+            Intent(ctx, TimerService::class.java).setAction(
+                if (isPaused) TimerService.ACTION_RESUME else TimerService.ACTION_PAUSE
+            ),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val endNowIntent = PendingIntent.getService(
+            ctx, 103,
+            Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_END_NOW),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
 
-        return NotificationCompat.Builder(ctx, CHANNEL_TIMER)
+        val builder = NotificationCompat.Builder(ctx, CHANNEL_TIMER)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("SleepBT Active")
+            .setContentTitle(if (isPaused) "SleepBT (Paused)" else "SleepBT Active")
             .setContentText(if (warningText != null) "$remainingText  •  $warningText" else remainingText)
             .setOngoing(true)
             .setSilent(true)
-            .addAction(0, "Extend", extendIntent)
+            .addAction(0, if (isPaused) "Resume" else "Pause", pauseResumeIntent)
+            .addAction(0, "+Extend", extendIntent)
+            .addAction(0, "End Now", endNowIntent)
             .addAction(0, "Cancel", cancelIntent)
             .setContentIntent(launchIntent(ctx))
+
+        if (!isPaused && endTimeMillis > System.currentTimeMillis()) {
+            builder.setUsesChronometer(true)
+            builder.setChronometerCountDown(true)
+            builder.setWhen(endTimeMillis)
+        }
+
+        return builder
     }
 
     /**

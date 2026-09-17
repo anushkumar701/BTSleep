@@ -117,7 +117,7 @@ interface SessionDao {
     suspend fun deleteEmptySessions()
 
     @Query("DELETE FROM sessions WHERE id NOT IN (SELECT id FROM sessions ORDER BY start_time DESC LIMIT :maxKeep)")
-    suspend fun pruneOldSessions(maxKeep: Int = 10)
+    suspend fun pruneOldSessions(maxKeep: Int = 500)
 }
 
 @Dao
