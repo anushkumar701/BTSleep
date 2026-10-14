@@ -66,9 +66,9 @@ fun HealthScreen(
         // Header
         item {
             Column {
-                Text("Ear Health", style = MaterialTheme.typography.displaySmall,
+                Text("Connected Time", style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Black, color = TextPrimary)
-                Text("Earbuds & neckband usage analysis",
+                Text("Earbuds & headphone connection duration",
                     style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
             }
         }
@@ -106,7 +106,7 @@ fun HealthScreen(
                             color = TextPrimary
                         )
                         Text(
-                            text = "Daily earbuds & neckband use strictly under 60m",
+                            text = "Daily earbud & headphone connected time under 60m",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -169,35 +169,6 @@ fun HealthScreen(
                 Spacer(Modifier.height(12.dp))
                 Text(riskAdvice, style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary, textAlign = TextAlign.Center)
-            }
-        }
-
-        // Today's usage
-        item {
-            Row(
-                Modifier.fillMaxWidth()
-                    .background(Surface1, RoundedCornerShape(18.dp))
-                    .padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(Modifier.size(48.dp).background(AccentBlue.copy(0.1f), CircleShape), Alignment.Center) {
-                    Icon(Icons.Rounded.Today, null, tint = AccentBlue, modifier = Modifier.size(24.dp))
-                }
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Today", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("Earbuds & neckband listening time", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                }
-                Text(
-                    formatMinutes(state.todayMinutes),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
-                    color = when {
-                        state.todayMinutes > 120 -> StatusRed
-                        state.todayMinutes > 60 -> StatusOrange
-                        else -> StatusGreen
-                    }
-                )
             }
         }
 
@@ -333,7 +304,7 @@ fun HealthScreen(
                     Icon(Icons.Rounded.Info, null, tint = StatusOrange, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        "Estimate based on listening duration only. Volume level is not measured; this is not medical advice.",
+                        "Estimate based on Bluetooth connection duration only. Sound level and decibels are not measured; this is not medical advice.",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary,
                         lineHeight = 16.sp

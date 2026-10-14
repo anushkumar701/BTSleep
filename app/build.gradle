@@ -2,8 +2,12 @@ plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
     id 'com.google.devtools.ksp'
-    id 'com.google.gms.google-services'
-    id 'com.google.firebase.crashlytics'
+}
+
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
 }
 
 android {
@@ -11,20 +15,17 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.SleepBt"
+        applicationId "com.smartbluetoothsleeptracker"
         minSdk 30
         targetSdk 35
-        versionCode 3
-        versionName "1.0.2"
+        versionCode 4
+        versionName "1.0.3"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary true
         }
         resourceConfigurations += ["en"]
-        ndk {
-            abiFilters "arm64-v8a", "armeabi-v7a"
-        }
 
         // Room schema export
         ksp {
@@ -32,12 +33,33 @@ android {
         }
     }
 
+    sourceSets {
+        test.assets.srcDirs += files("$projectDir/schemas")
+        test.resources.srcDirs += files("$projectDir/schemas")
+    }
+
     signingConfigs {
         release {
-            storeFile file("${rootDir}/release.keystore")
-            storePassword 'midnight2026'
-            keyAlias 'sleepbt_key'
-            keyPassword 'midnight2026'
+            def storePath = keystoreProperties['storeFile'] ?: System.getenv("SLEEPBT_KEYSTORE_FILE") ?: "${rootDir}/release.keystore"
+            def storePass = keystoreProperties['storePassword'] ?: System.getenv("SLEEPBT_KEYSTORE_PASSWORD") ?: ""
+            def keyAl = keystoreProperties['keyAlias'] ?: System.getenv("SLEEPBT_KEY_ALIAS") ?: ""
+            def keyPass = keystoreProperties['keyPassword'] ?: System.getenv("SLEEPBT_KEY_PASSWORD") ?: ""
+
+            if (!file(storePath).exists() || storePass.isEmpty() || keyAl.isEmpty() || keyPass.isEmpty()) {
+                gradle.taskGraph.whenReady { taskGraph ->
+                    if (taskGraph.hasTask(":app:assembleRelease") || taskGraph.hasTask(":app:bundleRelease") || taskGraph.hasTask(":app:packageRelease")) {
+                        throw new InvalidUserDataException("Release build failed: Keystore file ($storePath) or signing credentials (storePassword, keyAlias, keyPassword) are missing. Please provide keystore.properties or SLEEPBT_* environment variables.")
+                    }
+                }
+            }
+
+            storeFile file(storePath)
+            storePassword storePass
+            keyAlias keyAl
+            keyPassword keyPass
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
         }
     }
 
@@ -80,6 +102,12 @@ android {
         kotlinCompilerExtensionVersion '1.5.14'
     }
 
+    lint {
+        abortOnError true
+        checkReleaseBuilds true
+        disable 'BatteryLife', 'IconLauncherShape', 'IconLocation', 'IconDuplicates', 'UnusedResources'
+    }
+
     packaging {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
@@ -119,21 +147,15 @@ dependencies {
     // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
 
-
-
     // Debug
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
 
-    // Firebase
-    implementation platform('com.google.firebase:firebase-bom:33.5.1')
-    implementation 'com.google.firebase:firebase-analytics-ktx'
-    implementation 'com.google.firebase:firebase-auth-ktx'
-    implementation 'com.google.firebase:firebase-firestore-ktx'
-    implementation 'com.google.firebase:firebase-crashlytics-ktx'
-    implementation 'com.google.firebase:firebase-messaging-ktx'
-
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1'
     testImplementation 'io.mockk:mockk:1.13.12'
+    testImplementation 'androidx.test:core:1.6.1'
+    testImplementation 'androidx.test.ext:junit:1.2.1'
+    testImplementation 'androidx.room:room-testing:2.6.1'
+    testImplementation 'org.robolectric:robolectric:4.13'
 }

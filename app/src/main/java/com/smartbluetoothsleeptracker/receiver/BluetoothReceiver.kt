@@ -105,6 +105,7 @@ class BluetoothReceiver : BroadcastReceiver() {
                         } else {
                             app.db.deviceDao().updateLastConnected(address, now)
                         }
+                        app.btMonitor.refresh()
                     } catch (e: Exception) {
                         Log.e(TAG, "Error saving connected device: ${e.message}")
                     } finally {
@@ -119,13 +120,14 @@ class BluetoothReceiver : BroadcastReceiver() {
                 val now = System.currentTimeMillis()
 
                 Log.i(TAG, "ACL_DISCONNECTED: ${device.name ?: address}")
+                app.btMonitor.refresh()
 
                 val startTime = prefs.getLong("$KEY_PREFIX_START$address", 0L)
                 prefs.edit().remove("$KEY_PREFIX_START$address").apply()
 
                 if (startTime > 0L && now > startTime) {
                     val durationMs = now - startTime
-                    val minutes = (durationMs / 60_000L).toInt()
+                    val minutes = com.smartbluetoothsleeptracker.service.TimerCalculations.calculateDurationMinutes(durationMs)
 
                     // Record session and daily usage for background connections lasting >= 1 minute
                     if (minutes >= 1) {
@@ -224,15 +226,41 @@ class BluetoothReceiver : BroadcastReceiver() {
 
     @SuppressLint("MissingPermission")
     private fun inferDeviceType(device: BluetoothDevice): DeviceType {
-        val major = device.bluetoothClass?.majorDeviceClass ?: return DeviceType.OTHER
+        val name = (device.name ?: "").lowercase().trim()
+
+        if (name.contains("speaker") || name.contains("soundbar") || name.contains("theatre") ||
+            name.contains("theater") || name.contains("tv") || name.contains("echo") || name.contains("nest")) {
+            return DeviceType.HOME_THEATRE
+        }
+
+        val isNeckband = name.contains("neck") || name.contains("band") ||
+                name.contains("rockerz") || name.contains("bullets") || name.contains("tangent") ||
+                name.contains("curve") || name.contains("tune") || name.contains("wi-c") ||
+                name.contains("wi-1000") || name.contains("wi-xb") || name.contains("collar") ||
+                name.contains("flex") || name.contains("evolve") || name.contains("glide") ||
+                name.contains("arc") || (name.contains("wireless") && !name.contains("true wireless") && !name.contains("tws"))
+
+        if (isNeckband) {
+            return DeviceType.NECKBAND
+        }
+
+        val isTws = name.contains("tws") || name.contains("true wireless") ||
+                name.contains("airpod") || name.contains("earbud") || name.contains("buds") ||
+                name.contains("airdopes") || name.contains("earphone") || name.contains("freebuds") ||
+                name.contains("galaxy buds") || name.contains("pixel buds") || name.contains("dots") ||
+                name.contains("encod")
+
+        if (isTws) {
+            return DeviceType.EARBUDS
+        }
+
+        val major = device.bluetoothClass?.majorDeviceClass
         return when (major) {
             BluetoothClass.Device.Major.AUDIO_VIDEO -> {
-                val name = (device.name ?: "").lowercase()
-                when {
-                    name.contains("buds") || name.contains("pod") || name.contains("ear") -> DeviceType.EARBUDS
-                    name.contains("neck") || name.contains("band") -> DeviceType.NECKBAND
-                    name.contains("speaker") || name.contains("soundbar") || name.contains("theatre") -> DeviceType.HOME_THEATRE
-                    else -> DeviceType.EARBUDS
+                if (name.contains("headphone") || name.contains("wh-") || name.contains("over-ear") || name.contains("crusher")) {
+                    DeviceType.NECKBAND
+                } else {
+                    DeviceType.EARBUDS
                 }
             }
             BluetoothClass.Device.Major.COMPUTER -> DeviceType.PC

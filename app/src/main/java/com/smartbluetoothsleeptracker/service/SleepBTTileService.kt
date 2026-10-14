@@ -19,7 +19,6 @@ import kotlinx.coroutines.launch
  * Quick Settings Tile allowing users to quickly start or stop the sleep timer
  * directly from the Android status bar / notification shade without opening the app.
  */
-@RequiresApi(Build.VERSION_CODES.N)
 class SleepBTTileService : TileService() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -42,13 +41,23 @@ class SleepBTTileService : TileService() {
                 }
                 startService(cancelIntent)
             } else {
+                // Check if any audio device is connected
+                val connected = app.btMonitor.connectedDevices.value
+                if (connected.isEmpty()) {
+                    android.widget.Toast.makeText(
+                        this@SleepBTTileService,
+                        "Connect headphones or earbuds first",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    return@launch
+                }
+
                 // Start timer with saved preference
                 HapticManager.vibrateClick(this@SleepBTTileService)
                 val settings = app.prefs.settings.first()
-                val minutes = settings.selectedMinutes.toInt().coerceAtLeast(15)
+                val minutes = settings.selectedMinutes.toInt().coerceIn(1, 120)
 
                 // Get connected devices or bonded devices
-                val connected = app.btMonitor.connectedDevices.value
                 val targets = connected.filter { it.isFavorite }
                     .ifEmpty { connected }
                     .map { it.address }
@@ -66,9 +75,7 @@ class SleepBTTileService : TileService() {
         val running = TimerService.isRunning
         tile.state = if (running) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.label = "Sleep Timer"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            tile.subtitle = if (running) "Active" else "Tap to start"
-        }
+        tile.subtitle = if (running) "Active" else "Tap to start"
         tile.updateTile()
     }
 

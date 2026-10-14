@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -50,13 +51,18 @@ import com.smartbluetoothsleeptracker.viewmodel.SettingsViewModel
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
+    modifier: Modifier = Modifier,
+    onNavigateToHome: () -> Unit = {},
     onNavigateToPrivacyPolicy: () -> Unit = {},
-    onNavigateToTermsOfService: () -> Unit = {},
-    modifier: Modifier = Modifier
+    onNavigateToTermsOfService: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val s = state.settings
     val context = LocalContext.current
+
+    var isAutoStartExempt by remember {
+        mutableStateOf(com.smartbluetoothsleeptracker.core.util.AutoStartHelper.isAutoStartOrBatteryOptimizationExempt(context))
+    }
 
     // Refresh permissions when screen becomes visible or activity resumes
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -64,6 +70,7 @@ fun SettingsScreen(
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshStatus()
+                isAutoStartExempt = com.smartbluetoothsleeptracker.core.util.AutoStartHelper.isAutoStartOrBatteryOptimizationExempt(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -114,130 +121,6 @@ fun SettingsScreen(
             )
         }
 
-        // ── PLAYBACK CONTROL ───────────────────────────────────────────
-        item { Spacer(Modifier.height(8.dp)); SectionHeader("Playback Control") }
-        item {
-            SettingToggle(
-                icon = Icons.AutoMirrored.Rounded.VolumeDown,
-                title = "Stop Playback on Timer End",
-                subtitle = "Gradually fade volume to zero before disconnecting",
-                checked = s.playbackStopEnabled,
-                onCheckedChange = { viewModel.setPlaybackStop(it) }
-            )
-        }
-        if (s.playbackStopEnabled) {
-            item {
-                val focusManager = LocalFocusManager.current
-                val currentMin = maxOf(1, s.fadeOutDurationSeconds / 60)
-                var tfValue by remember(currentMin) {
-                    val str = currentMin.toString()
-                    mutableStateOf(TextFieldValue(text = str, selection = TextRange(str.length)))
-                }
-
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(Surface1, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Rounded.Speed, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Fade-Out Duration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("Ramp down volume before disconnect (1–30 min)", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                        }
-                        OutlinedTextField(
-                            value = tfValue,
-                            onValueChange = { input ->
-                                val filtered = input.text.filter { it.isDigit() }.take(2)
-                                tfValue = input.copy(
-                                    text = filtered,
-                                    selection = TextRange(filtered.length)
-                                )
-                                val numMin = filtered.toIntOrNull()
-                                if (numMin != null) {
-                                    viewModel.setFadeOutDuration(numMin.coerceIn(1, 30) * 60)
-                                }
-                            },
-                            modifier = Modifier
-                                .width(68.dp)
-                                .onFocusChanged { focusState ->
-                                    if (focusState.isFocused) {
-                                        tfValue = tfValue.copy(selection = TextRange(tfValue.text.length))
-                                    }
-                                },
-                            textStyle = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center,
-                                color = TextPrimary
-                            ),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onDone = {
-                                    focusManager.clearFocus()
-                                }
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = AccentBlue,
-                                unfocusedBorderColor = SurfaceBorder,
-                                focusedContainerColor = Surface2,
-                                unfocusedContainerColor = Surface2
-                            )
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("min", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                    }
-                }
-            }
-            item {
-                InfoCard(
-                    "During the fade, pressing a volume key will cancel the fade, restore volume, " +
-                    "and extend the timer instead of disconnecting."
-                )
-            }
-        }
-
-        // ── BLUETOOTH ──────────────────────────────────────────────────
-        item { Spacer(Modifier.height(8.dp)); SectionHeader("Bluetooth") }
-        item {
-            SettingToggle(
-                icon = Icons.Rounded.Shield,
-                title = "Reconnect Blocker",
-                subtitle = "Block device from reconnecting after timer ends",
-                checked = s.reconnectBlockerEnabled,
-                onCheckedChange = { viewModel.setReconnectBlocker(it) }
-            )
-        }
-        if (s.reconnectBlockerEnabled) {
-            item {
-                SettingRow(
-                    icon = Icons.Rounded.Timelapse,
-                    title = "Cooldown Window",
-                    subtitle = "${s.cooldownSeconds} seconds",
-                    trailing = {
-                        Slider(
-                            value = s.cooldownSeconds.toFloat(),
-                            onValueChange = { viewModel.setCooldownSeconds(it.toInt()) },
-                            valueRange = 0f..120f,
-                            steps = 11,
-                            modifier = Modifier.width(140.dp),
-                            colors = SliderDefaults.colors(thumbColor = AccentBlue, activeTrackColor = AccentBlue)
-                        )
-                    }
-                )
-            }
-        }
-
-
         // ── SCREEN OFF ─────────────────────────────────────────────────
         item { Spacer(Modifier.height(8.dp)); SectionHeader("Screen") }
         item {
@@ -269,10 +152,32 @@ fun SettingsScreen(
             SettingToggle(
                 icon = Icons.Rounded.Vibration,
                 title = "Haptic Feedback",
-                subtitle = "Dial rotation ticks and button press vibration",
+                subtitle = "Dial rotation ticks for smooth mechanical ratchet feel",
                 checked = s.hapticFeedbackEnabled,
                 onCheckedChange = { viewModel.setHapticFeedback(it) }
             )
+        }
+        if (s.hapticFeedbackEnabled) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            com.smartbluetoothsleeptracker.core.haptics.HapticManager.testVibration(context)
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentBlue),
+                        border = BorderStroke(1.dp, AccentBlue.copy(alpha = 0.5f)),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Rounded.Vibration, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Test Vibration", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
 
         // ── NOTIFICATIONS ──────────────────────────────────────────────
@@ -308,8 +213,8 @@ fun SettingsScreen(
             }
         }
 
-        // ── SERVICE ────────────────────────────────────────────────────
-        item { Spacer(Modifier.height(8.dp)); SectionHeader("Service") }
+        // ── SERVICE & BACKGROUND ─────────────────────────────────────────
+        item { Spacer(Modifier.height(8.dp)); SectionHeader("Service & Background") }
         item {
             SettingToggle(
                 icon = Icons.Rounded.PowerSettingsNew,
@@ -317,6 +222,35 @@ fun SettingsScreen(
                 subtitle = "Timer runs in background when app is closed",
                 checked = s.foregroundServiceEnabled,
                 onCheckedChange = { viewModel.setForegroundService(it) }
+            )
+        }
+        item {
+            SettingNavRow(
+                icon = Icons.Rounded.Bolt,
+                title = "Auto-Start & Background Activity",
+                subtitle = if (isAutoStartExempt) "Exempt from battery saver • Background activity enabled" else "Allow SleepBT in system battery settings so sleep timers never get killed",
+                trailingBadge = {
+                    if (isAutoStartExempt) {
+                        Box(
+                            modifier = Modifier
+                                .background(StatusGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Enabled ✓", color = StatusGreen, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .background(StatusOrange.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Tap to Enable", color = StatusOrange, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+                },
+                onClick = {
+                    com.smartbluetoothsleeptracker.core.util.AutoStartHelper.openAutoStartSettings(context)
+                }
             )
         }
 
@@ -383,12 +317,51 @@ fun SettingsScreen(
                 onClick = {
                     scope.launch {
                         checking = true
-                        updateManager.checkForUpdates()
+                        updateManager.checkForUpdates(force = true)
                         checking = false
                         val info = updateManager.updateState.value
-                        if (!info.isAvailable) {
+                        if (info.isAvailable) {
+                            updateManager.openReleaseInBrowser(info.downloadUrl)
+                        } else {
                             android.widget.Toast.makeText(context, "SleepBT is up to date (v${com.smartbluetoothsleeptracker.BuildConfig.VERSION_NAME})", android.widget.Toast.LENGTH_SHORT).show()
                         }
+                    }
+                }
+            )
+        }
+
+        // ── HELP & GUIDE ────────────────────────────────────────────────
+        item { Spacer(Modifier.height(8.dp)); SectionHeader("Help & Guide") }
+        item {
+            SettingNavRow(
+                icon = Icons.Rounded.School,
+                title = "App Guide & Interactive Tutorial",
+                subtitle = "Launch the hands-on guided tour on the Home screen",
+                onClick = {
+                    viewModel.setTutorialCompleted(false)
+                    onNavigateToHome()
+                }
+            )
+        }
+        item {
+            SettingNavRow(
+                icon = Icons.Rounded.Email,
+                title = "Feedback & Queries",
+                subtitle = "Contact the developer directly",
+                onClick = {
+                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("mailto:midnightcompiler01@gmail.com")
+                        putExtra(Intent.EXTRA_SUBJECT, "SleepBT Feedback & Queries (v${com.smartbluetoothsleeptracker.BuildConfig.VERSION_NAME})")
+                    }
+                    try {
+                        context.startActivity(intent)
+                    } catch (_: Exception) {
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "message/rfc822"
+                            putExtra(Intent.EXTRA_EMAIL, arrayOf("midnightcompiler01@gmail.com"))
+                            putExtra(Intent.EXTRA_SUBJECT, "SleepBT Feedback & Queries")
+                        }
+                        runCatching { context.startActivity(Intent.createChooser(shareIntent, "Send Feedback")) }
                     }
                 }
             )
@@ -420,9 +393,16 @@ fun SettingsScreen(
                 HorizontalDivider(color = SurfaceBorder)
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Support & Feedback: midnightcompiler01@gmail.com",
+                    "For feedback & queries: midnightcompiler01@gmail.com",
                     style = MaterialTheme.typography.labelSmall,
-                    color = AccentBlue
+                    color = AccentBlue,
+                    modifier = Modifier.clickable {
+                        val intent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("mailto:midnightcompiler01@gmail.com")
+                            putExtra(Intent.EXTRA_SUBJECT, "SleepBT Feedback & Queries (v${com.smartbluetoothsleeptracker.BuildConfig.VERSION_NAME})")
+                        }
+                        runCatching { context.startActivity(intent) }
+                    }
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -482,7 +462,6 @@ private fun SettingToggle(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    val view = androidx.compose.ui.platform.LocalView.current
     Row(
         Modifier.fillMaxWidth()
             .background(Surface1, RoundedCornerShape(16.dp))
@@ -498,8 +477,6 @@ private fun SettingToggle(
         Switch(
             checked = checked,
             onCheckedChange = { newValue ->
-                view.isHapticFeedbackEnabled = true
-                view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
                 onCheckedChange(newValue)
             },
             colors = SwitchDefaults.colors(
@@ -516,25 +493,31 @@ private fun SettingToggle(
 private fun SettingNavRow(
     icon: ImageVector,
     title: String,
+    subtitle: String? = null,
+    trailingBadge: @Composable (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
-    val view = androidx.compose.ui.platform.LocalView.current
     Row(
         Modifier.fillMaxWidth()
             .background(Surface1, RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
-            .clickable {
-                view.isHapticFeedbackEnabled = true
-                view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
-                onClick()
-            }
+            .clickable { onClick() }
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(14.dp))
-        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary,
-            modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TextPrimary)
+            if (subtitle != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(subtitle, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+            }
+        }
+        if (trailingBadge != null) {
+            trailingBadge()
+            Spacer(Modifier.width(8.dp))
+        }
         Icon(Icons.Rounded.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(20.dp))
     }
 }

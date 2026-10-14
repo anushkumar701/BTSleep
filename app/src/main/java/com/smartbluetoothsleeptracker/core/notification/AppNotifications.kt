@@ -43,31 +43,29 @@ object AppNotifications {
     }
 
     /**
-     * Foreground service notification showing countdown.
-     * When [warningText] is provided, it replaces the subtitle with a warning line.
+     * Foreground service notification showing countdown, connected device branding, battery, and accurate time.
+     * Clean, modern, minimalist layout.
      */
     fun timerNotification(
         ctx: Context,
         remainingText: String,
         warningText: String? = null,
         isPaused: Boolean = false,
-        endTimeMillis: Long = 0L
+        endTimeMillis: Long = 0L,
+        deviceName: String? = null,
+        batteryPercent: Int? = null,
+        extendMinutes: Int = 5
     ): NotificationCompat.Builder {
-        val cancelIntent = PendingIntent.getService(
-            ctx, 100,
-            Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_CANCEL),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val extendIntent = PendingIntent.getService(
-            ctx, 101,
-            Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_EXTEND),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
         val pauseResumeIntent = PendingIntent.getService(
             ctx, 102,
             Intent(ctx, TimerService::class.java).setAction(
                 if (isPaused) TimerService.ACTION_RESUME else TimerService.ACTION_PAUSE
             ),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val extendIntent = PendingIntent.getService(
+            ctx, 101,
+            Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_EXTEND),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val endNowIntent = PendingIntent.getService(
@@ -76,22 +74,51 @@ object AppNotifications {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val dev = if (!deviceName.isNullOrBlank() && deviceName != "Unknown") deviceName else "Bluetooth Audio"
+
+        val title = when {
+            isPaused -> "Paused • $dev"
+            warningText != null -> "Disconnecting Soon • $dev"
+            else -> dev
+        }
+
+        val content = when {
+            isPaused -> "Timer paused • Tap Resume to continue"
+            warningText != null -> warningText
+            endTimeMillis > System.currentTimeMillis() -> {
+                val timeFormat = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
+                val endFormatted = timeFormat.format(java.util.Date(endTimeMillis))
+                "Turns off at $endFormatted • Fades audio"
+            }
+            else -> if (remainingText.isNotBlank()) "$remainingText remaining" else "Sleep timer active"
+        }
+
+        val subText = when {
+            batteryPercent != null && batteryPercent in 0..100 -> "$batteryPercent%"
+            isPaused -> "Paused"
+            warningText != null -> "Ending Soon"
+            else -> "SleepBT"
+        }
+
         val builder = NotificationCompat.Builder(ctx, CHANNEL_TIMER)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(if (isPaused) "SleepBT (Paused)" else "SleepBT Active")
-            .setContentText(if (warningText != null) "$remainingText  •  $warningText" else remainingText)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setSubText(subText)
             .setOngoing(true)
             .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
             .addAction(0, if (isPaused) "Resume" else "Pause", pauseResumeIntent)
-            .addAction(0, "+Extend", extendIntent)
-            .addAction(0, "End Now", endNowIntent)
-            .addAction(0, "Cancel", cancelIntent)
+            .addAction(0, "+${extendMinutes}m", extendIntent)
+            .addAction(0, "Stop", endNowIntent)
             .setContentIntent(launchIntent(ctx))
 
         if (!isPaused && endTimeMillis > System.currentTimeMillis()) {
             builder.setUsesChronometer(true)
             builder.setChronometerCountDown(true)
             builder.setWhen(endTimeMillis)
+            builder.setShowWhen(true)
         }
 
         return builder
@@ -100,20 +127,27 @@ object AppNotifications {
     /**
      * Cooldown active notification with "Allow reconnect" action.
      */
-    fun cooldownNotification(ctx: Context, secondsLeft: Int): NotificationCompat.Builder {
+    fun cooldownNotification(
+        ctx: Context,
+        secondsLeft: Int,
+        deviceName: String? = null
+    ): NotificationCompat.Builder {
         val allowIntent = PendingIntent.getService(
             ctx, 104,
             Intent(ctx, TimerService::class.java).setAction(TimerService.ACTION_ALLOW_RECONNECT),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val dev = if (!deviceName.isNullOrBlank() && deviceName != "Unknown") deviceName else "Bluetooth device"
+
         return NotificationCompat.Builder(ctx, CHANNEL_COOLDOWN)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Reconnect blocked")
-            .setContentText("${secondsLeft}s remaining — device will be re-disconnected if it reconnects")
+            .setContentTitle("Sleep Protection Active")
+            .setContentText("${secondsLeft}s cooldown — blocking reconnects from $dev")
+            .setSubText("Cooldown")
             .setOngoing(true)
             .setSilent(true)
-            .addAction(0, "Allow reconnect now", allowIntent)
+            .addAction(0, "Allow Reconnect", allowIntent)
             .setContentIntent(launchIntent(ctx))
     }
 
@@ -127,14 +161,17 @@ object AppNotifications {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val dev = if (deviceName.isNotBlank() && deviceName != "Unknown") deviceName else "Bluetooth device"
+
         return NotificationCompat.Builder(ctx, CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Reconnect Blocked")
-            .setContentText("Blocked reconnect attempt from $deviceName (Cooldown Active)")
+            .setContentText("$dev tried to reconnect and was disconnected to protect your sleep.")
+            .setSubText("Blocked")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setAutoCancel(true)
-            .addAction(0, "Allow Reconnect Now", allowIntent)
+            .addAction(0, "Allow Reconnect", allowIntent)
             .setContentIntent(launchIntent(ctx))
     }
 
@@ -142,13 +179,16 @@ object AppNotifications {
      * Result notification after disconnect attempt.
      */
     fun disconnectResultNotification(ctx: Context, success: Boolean, deviceName: String): NotificationCompat.Builder {
+        val dev = if (deviceName.isNotBlank() && deviceName != "Unknown") deviceName else "Bluetooth device"
+
         return NotificationCompat.Builder(ctx, CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(if (success) "Disconnected" else "Disconnect failed")
+            .setContentTitle(if (success) "Audio Paused & Disconnected" else "Disconnect Action Needed")
             .setContentText(
-                if (success) "$deviceName disconnected successfully"
-                else "Couldn't disconnect $deviceName automatically — tap to open Bluetooth settings"
+                if (success) "$dev disconnected. Sleep well! 🌙"
+                else "Couldn't disconnect $dev automatically — tap to open Bluetooth settings"
             )
+            .setSubText(if (success) "Sleep Complete" else "Manual Action")
             .setAutoCancel(true)
             .setContentIntent(
                 if (success) launchIntent(ctx)

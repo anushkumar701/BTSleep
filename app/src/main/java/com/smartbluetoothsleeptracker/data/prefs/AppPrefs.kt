@@ -45,6 +45,7 @@ data class AppSettings(
 
     // Onboarding
     val onboardingComplete: Boolean = false,
+    val tutorialCompleted: Boolean = false,
     val tosAcceptedTimestamp: Long = 0L,
     val tosAcceptedVersion: String = "",
 
@@ -54,13 +55,22 @@ data class AppSettings(
     // Custom device categories (JSON array string)
     val customCategories: String = "[]",
 
+    // Analytics & Telemetry (Optional)
+    val analyticsEnabled: Boolean = true,
+
+    // Updates
+    val lastUpdateCheckTime: Long = 0L,
+
     // Persisted timer state (survives process death)
     val timerEndWallClock: Long? = null,
     val timerPausedRemaining: Long? = null,
     val timerTargetDevices: String = "", // comma-separated MAC addresses
     val timerPlannedMinutes: Int = 0,
     val timerExtendedMinutes: Int = 0,
-    val activeSessionId: Long = 0L
+    val activeSessionId: Long = 0L,
+    val timerSessionStartTime: Long = 0L,
+    val timerTotalPausedMs: Long = 0L,
+    val timerPauseStartTime: Long = 0L
 )
 
 class AppPrefs(private val context: Context) {
@@ -87,16 +97,22 @@ class AppPrefs(private val context: Context) {
                 foregroundServiceEnabled= prefs[FG_SERVICE] ?: true,
                 themeMode               = prefs[THEME_MODE] ?: "DARK",
                 onboardingComplete      = prefs[ONBOARDING_COMPLETE] ?: false,
+                tutorialCompleted       = prefs[TUTORIAL_COMPLETED] ?: false,
                 tosAcceptedTimestamp    = prefs[TOS_TIMESTAMP] ?: 0L,
                 tosAcceptedVersion      = prefs[TOS_VERSION] ?: "",
                 lastUsedPreset          = prefs[LAST_USED_PRESET] ?: 0L,
                 customCategories        = prefs[CUSTOM_CATEGORIES] ?: "[]",
+                analyticsEnabled        = prefs[ANALYTICS_ENABLED] ?: true,
+                lastUpdateCheckTime     = prefs[LAST_UPDATE_CHECK] ?: 0L,
                 timerEndWallClock       = prefs[TIMER_END_WALL]?.takeIf { it > 0L },
                 timerPausedRemaining    = prefs[TIMER_PAUSED]?.takeIf { it > 0L },
                 timerTargetDevices      = prefs[TIMER_TARGETS] ?: "",
                 timerPlannedMinutes     = prefs[TIMER_PLANNED] ?: 0,
                 timerExtendedMinutes    = prefs[TIMER_EXTENDED] ?: 0,
-                activeSessionId         = prefs[ACTIVE_SESSION_ID] ?: 0L
+                activeSessionId         = prefs[ACTIVE_SESSION_ID] ?: 0L,
+                timerSessionStartTime   = prefs[TIMER_SESSION_START] ?: 0L,
+                timerTotalPausedMs      = prefs[TIMER_TOTAL_PAUSED] ?: 0L,
+                timerPauseStartTime     = prefs[TIMER_PAUSE_START] ?: 0L
             )
         }
 
@@ -114,6 +130,7 @@ class AppPrefs(private val context: Context) {
     suspend fun setForegroundService(on: Boolean) = ds.edit { it[FG_SERVICE] = on }
     suspend fun setThemeMode(mode: String)        = ds.edit { it[THEME_MODE] = mode }
     suspend fun setOnboardingComplete(done: Boolean) = ds.edit { it[ONBOARDING_COMPLETE] = done }
+    suspend fun setTutorialCompleted(done: Boolean) = ds.edit { it[TUTORIAL_COMPLETED] = done }
     suspend fun setTosAccepted(ts: Long, version: String = CURRENT_TOS_VERSION) = ds.edit {
         it[TOS_TIMESTAMP] = ts
         it[TOS_VERSION] = version
@@ -123,6 +140,8 @@ class AppPrefs(private val context: Context) {
     suspend fun setWeeklySummaryHour(h: Int)      = ds.edit { it[WEEKLY_SUMMARY_HOUR] = h.coerceIn(0, 23) }
     suspend fun setWeeklySummaryDay(d: Int)       = ds.edit { it[WEEKLY_SUMMARY_DAY] = d.coerceIn(1, 7) }
     suspend fun setCustomCategories(json: String) = ds.edit { it[CUSTOM_CATEGORIES] = json }
+    suspend fun setAnalyticsEnabled(on: Boolean)  = ds.edit { it[ANALYTICS_ENABLED] = on }
+    suspend fun setLastUpdateCheckTime(ts: Long)  = ds.edit { it[LAST_UPDATE_CHECK] = ts }
 
     // Timer persistence
     suspend fun setTimerEnd(ms: Long?)            = ds.edit { if (ms == null) it.remove(TIMER_END_WALL) else it[TIMER_END_WALL] = ms }
@@ -131,6 +150,9 @@ class AppPrefs(private val context: Context) {
     suspend fun setTimerPlanned(min: Int)         = ds.edit { it[TIMER_PLANNED] = min }
     suspend fun setTimerExtended(min: Int)        = ds.edit { it[TIMER_EXTENDED] = min }
     suspend fun setActiveSessionId(id: Long)      = ds.edit { it[ACTIVE_SESSION_ID] = id }
+    suspend fun setTimerSessionStart(ts: Long)    = ds.edit { it[TIMER_SESSION_START] = ts }
+    suspend fun setTimerTotalPaused(ms: Long)     = ds.edit { it[TIMER_TOTAL_PAUSED] = ms }
+    suspend fun setTimerPauseStart(ts: Long)      = ds.edit { it[TIMER_PAUSE_START] = ts }
 
     suspend fun clearTimer() = ds.edit {
         it.remove(TIMER_END_WALL)
@@ -139,6 +161,9 @@ class AppPrefs(private val context: Context) {
         it.remove(TIMER_PLANNED)
         it.remove(TIMER_EXTENDED)
         it.remove(ACTIVE_SESSION_ID)
+        it.remove(TIMER_SESSION_START)
+        it.remove(TIMER_TOTAL_PAUSED)
+        it.remove(TIMER_PAUSE_START)
     }
 
     companion object {
@@ -160,15 +185,21 @@ class AppPrefs(private val context: Context) {
         val FG_SERVICE          = booleanPreferencesKey("fg_service")
         val THEME_MODE          = stringPreferencesKey("theme_mode")
         val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
+        val TUTORIAL_COMPLETED  = booleanPreferencesKey("tutorial_completed")
         val TOS_TIMESTAMP       = longPreferencesKey("tos_timestamp")
         val TOS_VERSION         = stringPreferencesKey("tos_version")
         val LAST_USED_PRESET    = longPreferencesKey("last_used_preset")
         val CUSTOM_CATEGORIES   = stringPreferencesKey("custom_categories")
+        val ANALYTICS_ENABLED   = booleanPreferencesKey("analytics_enabled")
+        val LAST_UPDATE_CHECK   = longPreferencesKey("last_update_check")
         val TIMER_END_WALL      = longPreferencesKey("timer_end_wall")
         val TIMER_PAUSED        = longPreferencesKey("timer_paused")
         val TIMER_TARGETS       = stringPreferencesKey("timer_targets")
         val TIMER_PLANNED       = intPreferencesKey("timer_planned")
         val TIMER_EXTENDED      = intPreferencesKey("timer_extended")
         val ACTIVE_SESSION_ID   = longPreferencesKey("active_session_id")
+        val TIMER_SESSION_START = longPreferencesKey("timer_session_start")
+        val TIMER_TOTAL_PAUSED  = longPreferencesKey("timer_total_paused")
+        val TIMER_PAUSE_START   = longPreferencesKey("timer_pause_start")
     }
 }

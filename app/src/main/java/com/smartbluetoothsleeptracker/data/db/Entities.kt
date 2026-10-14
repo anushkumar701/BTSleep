@@ -59,6 +59,7 @@ data class SessionEntity(
     @ColumnInfo(name = "end_time") val endTime: Long? = null,
     @ColumnInfo(name = "planned_duration_min") val plannedDurationMin: Int,
     @ColumnInfo(name = "actual_duration_min") val actualDurationMin: Int? = null,
+    @ColumnInfo(name = "audio_stopped", defaultValue = "0") val audioStopped: Boolean = false,
     @ColumnInfo(name = "disconnect_confirmed") val disconnectConfirmed: Boolean = false,
     @ColumnInfo(name = "extended_minutes") val extendedMinutes: Int = 0,
     val date: String = "" // yyyy-MM-dd for easy queries

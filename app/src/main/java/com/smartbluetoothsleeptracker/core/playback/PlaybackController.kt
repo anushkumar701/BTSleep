@@ -80,7 +80,10 @@ class PlaybackController(private val context: Context) {
                 val newVol = (priorVolume - (volumeDecrement * currentStep)).toInt().coerceAtLeast(0)
                 if (newVol != lastSetVol) {
                     try {
-                        internalVolumeChanges.add(Pair(newVol, System.currentTimeMillis()))
+                        val nowMs = System.currentTimeMillis()
+                        lastProgrammaticChangeTime = nowMs
+                        lastProgrammaticVolume = newVol
+                        internalVolumeChanges.add(Pair(newVol, nowMs))
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
                         lastSetVol = newVol
                         Log.d(TAG, "Fade step $currentStep/$totalSteps: set volume to $newVol")
@@ -100,7 +103,10 @@ class PlaybackController(private val context: Context) {
             // Ensure volume is 0
             if (lastSetVol != 0) {
                 try {
-                    internalVolumeChanges.add(Pair(0, System.currentTimeMillis()))
+                    val nowMs = System.currentTimeMillis()
+                    lastProgrammaticChangeTime = nowMs
+                    lastProgrammaticVolume = 0
+                    internalVolumeChanges.add(Pair(0, nowMs))
                     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
                 } catch (e: Exception) {
                     Log.w(TAG, "setStreamVolume failed at finish: ${e.message}")
@@ -153,7 +159,7 @@ class PlaybackController(private val context: Context) {
         }
     }
 
-    private fun stealAudioFocusAndPause() {
+    fun stealAudioFocusAndPause() {
         try {
             val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                 .setAudioAttributes(
@@ -182,9 +188,18 @@ class PlaybackController(private val context: Context) {
         }
     }
 
+    @Volatile private var receiverRegisteredTime = 0L
+    @Volatile private var lastProgrammaticChangeTime = 0L
+    @Volatile private var lastProgrammaticVolume = -1
+
     // ── Volume key detection ───────────────────────────────────────────
 
     private fun registerVolumeReceiver() {
+        receiverRegisteredTime = System.currentTimeMillis()
+        lastProgrammaticChangeTime = 0L
+        lastProgrammaticVolume = priorVolume
+        userCancelled = false
+
         volumeReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 if (intent.action == "android.media.VOLUME_CHANGED_ACTION") {
@@ -192,16 +207,35 @@ class PlaybackController(private val context: Context) {
                     if (streamType == AudioManager.STREAM_MUSIC) {
                         val newVol = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
                         val currentVol = if (newVol != -1) newVol else audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                        
+
                         val now = System.currentTimeMillis()
+
+                        // 1. Ignore any broadcast delivered immediately upon registration (sticky/cached broadcast)
+                        if (now - receiverRegisteredTime < 400L) {
+                            Log.d(TAG, "Ignoring initial volume broadcast ($currentVol) right after registration")
+                            return
+                        }
+
                         // Clean up old entries (older than 2 seconds)
                         internalVolumeChanges.removeAll { now - it.second > 2000L }
-                        
+
+                        // 2. If volume actually increased, the user pressed Volume Up to stay awake!
+                        if (lastProgrammaticVolume in 0..100 && currentVol > lastProgrammaticVolume) {
+                            Log.i(TAG, "Volume increased ($lastProgrammaticVolume -> $currentVol) from user key press! Cancelling fade.")
+                            userCancelled = true
+                            return
+                        }
+
+                        // 3. If volume change matches our programmatic step or occurs during active fade step (< 450ms)
                         val isInternal = internalVolumeChanges.any { it.first == currentVol }
-                        if (isInternal) {
-                            Log.d(TAG, "Volume change event ($currentVol) matched internal fade step — ignoring")
-                        } else {
-                            Log.i(TAG, "Volume change event ($currentVol) detected from EXTERNAL USER KEY PRESS! Triggering cancellation.")
+                        if (isInternal || (now - lastProgrammaticChangeTime < 450L && currentVol <= lastProgrammaticVolume)) {
+                            Log.d(TAG, "Volume change event ($currentVol) matched programmatic fade step — ignoring")
+                            return
+                        }
+
+                        // 4. Volume changed when no programmatic step was underway (> 450ms ago): external key press
+                        if (now - lastProgrammaticChangeTime >= 450L && currentVol != lastProgrammaticVolume) {
+                            Log.i(TAG, "Volume change ($currentVol) detected from EXTERNAL USER KEY PRESS! Cancelling fade.")
                             userCancelled = true
                         }
                     }
@@ -213,7 +247,7 @@ class PlaybackController(private val context: Context) {
             context,
             volumeReceiver,
             filter,
-            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
         )
         Log.i(TAG, "Registered VOLUME_CHANGED_ACTION receiver for fade window")
     }

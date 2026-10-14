@@ -6,6 +6,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -57,23 +59,53 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val view = LocalView.current
-    val context = androidx.compose.ui.platform.LocalContext.current
     val hapticEnabled = state.settings.hapticFeedbackEnabled
 
-    LaunchedEffect(Unit) {
-        com.smartbluetoothsleeptracker.core.firebase.FirebaseManager.logHomeScreenLoad(context)
-    }
 
-    // Helper to conditionally perform haptic feedback
-    fun doHaptic(type: Int = HapticFeedbackConstants.LONG_PRESS) {
-        if (hapticEnabled) {
-            view.isHapticFeedbackEnabled = true
-            view.performHapticFeedback(type, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
-        }
+    // Helper to conditionally perform haptic feedback (reserved exclusively for rotary dialer)
+    fun doHaptic(@Suppress("UNUSED_PARAMETER") type: Int = HapticFeedbackConstants.LONG_PRESS) {
+        // No-op: Vibration is restricted exclusively to the rotary dialer per user request
     }
 
     var showCooldownPopup by rememberSaveable { mutableStateOf(true) }
+    var showFadeDialog by rememberSaveable { mutableStateOf(false) }
+    var showBlockDialog by rememberSaveable { mutableStateOf(false) }
+
+    val isTutorialActive = !state.settings.tutorialCompleted && !state.isTimerRunning && !state.cooldown.active
+    var tutorialStep by rememberSaveable { mutableIntStateOf(1) }
+    var userInteractedWithDial by rememberSaveable { mutableStateOf(false) }
+    var userInteractedWithFade by rememberSaveable { mutableStateOf(false) }
+    var initialMinutes by rememberSaveable { mutableLongStateOf(-1L) }
+    val scrollState = rememberScrollState()
+
+    LaunchedEffect(tutorialStep, isTutorialActive) {
+        if (isTutorialActive) {
+            when (tutorialStep) {
+                1 -> scrollState.animateScrollTo(0)
+                2 -> scrollState.animateScrollTo(500)
+                3 -> scrollState.animateScrollTo(350)
+                4 -> scrollState.animateScrollTo(scrollState.maxValue)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (initialMinutes == -1L) {
+            initialMinutes = state.selectedMinutes
+        }
+    }
+
+    LaunchedEffect(state.selectedMinutes) {
+        if (initialMinutes != -1L && state.selectedMinutes != initialMinutes) {
+            userInteractedWithDial = true
+        }
+    }
+
+    LaunchedEffect(showFadeDialog) {
+        if (showFadeDialog) {
+            userInteractedWithFade = true
+        }
+    }
 
     LaunchedEffect(state.cooldown.expiresAt) {
         if (state.cooldown.active && state.cooldown.expiresAt > System.currentTimeMillis()) {
@@ -96,27 +128,181 @@ fun HomeScreen(
         )
     }
 
-    Column(
+    if (showFadeDialog) {
+        AlertDialog(
+            onDismissRequest = { showFadeDialog = false },
+            containerColor = Surface2,
+            title = {
+                Text("Volume Fade Duration", color = TextPrimary, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text(
+                        "Audio volume will smoothly ramp down to zero before disconnecting.",
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    val fadeOptions = listOf(5, 10, 30, 60, 120, 300)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        fadeOptions.take(3).forEach { sec ->
+                            val selected = state.settings.fadeOutDurationSeconds == sec
+                            Button(
+                                onClick = {
+                                    doHaptic()
+                                    viewModel.setFadeOutDurationSeconds(sec)
+                                    showFadeDialog = false
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selected) AccentBlue else Surface3,
+                                    contentColor = if (selected) Color.White else TextPrimary
+                                ),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Text(if (sec >= 60) "${sec / 60}m" else "${sec}s", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        fadeOptions.drop(3).forEach { sec ->
+                            val selected = state.settings.fadeOutDurationSeconds == sec
+                            Button(
+                                onClick = {
+                                    doHaptic()
+                                    viewModel.setFadeOutDurationSeconds(sec)
+                                    showFadeDialog = false
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selected) AccentBlue else Surface3,
+                                    contentColor = if (selected) Color.White else TextPrimary
+                                ),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Text(if (sec >= 60) "${sec / 60}m" else "${sec}s", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFadeDialog = false }) {
+                    Text("Close", color = AccentBlue)
+                }
+            }
+        )
+    }
+
+    if (showBlockDialog) {
+        AlertDialog(
+            onDismissRequest = { showBlockDialog = false },
+            containerColor = Surface2,
+            title = {
+                Text("Reconnect Cooldown", color = TextPrimary, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text(
+                        "Block Bluetooth devices from reconnecting for this protection window:",
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    val blockOptions = listOf(15, 30, 45, 60, 90, 120)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        blockOptions.take(3).forEach { sec ->
+                            val selected = state.settings.cooldownSeconds == sec
+                            Button(
+                                onClick = {
+                                    doHaptic()
+                                    viewModel.setCooldownSeconds(sec)
+                                    showBlockDialog = false
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selected) StatusOrange else Surface3,
+                                    contentColor = if (selected) Color.White else TextPrimary
+                                ),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Text("${sec}s", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        blockOptions.drop(3).forEach { sec ->
+                            val selected = state.settings.cooldownSeconds == sec
+                            Button(
+                                onClick = {
+                                    doHaptic()
+                                    viewModel.setCooldownSeconds(sec)
+                                    showBlockDialog = false
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selected) StatusOrange else Surface3,
+                                    contentColor = if (selected) Color.White else TextPrimary
+                                ),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Text(if (sec >= 60) "${sec / 60}m" else "${sec}s", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBlockDialog = false }) {
+                    Text("Close", color = StatusOrange)
+                }
+            }
+        )
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(
-                top = 8.dp,
-                bottom = 16.dp,
-                start = 16.dp,
-                end = 16.dp
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // ── Connection Status Bar ──────────────────────────────────────
-        ConnectionStatusBar(
-            devices = state.connectedDevices,
-            btEnabled = state.btEnabled,
-            cooldownActive = state.cooldown.active,
-            isDisconnectReady = state.isDisconnectReady
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(
+                    top = 8.dp,
+                    bottom = if (isTutorialActive) 240.dp else 24.dp,
+                    start = 16.dp,
+                    end = 16.dp
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // ── Connection Status Bar ──────────────────────────────────────
+            ConnectionStatusBar(
+                devices = state.connectedDevices,
+                btEnabled = state.btEnabled,
+                cooldownActive = state.cooldown.active
+            )
 
-        Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(12.dp))
 
         AnimatedContent(
             targetState = Pair(state.cooldown.active, state.isTimerRunning),
@@ -147,37 +333,26 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                var isPressing by remember { mutableStateOf(false) }
-                val cancelScale by animateFloatAsState(if (isPressing) 0.95f else 1f)
-
                 OutlinedButton(
-                    onClick = { /* Do nothing on normal click, maybe show toast */ },
+                    onClick = {
+                        doHaptic()
+                        viewModel.cancelTimer()
+                    },
                     modifier = Modifier
                         .weight(1f)
-                        .height(60.dp)
-                        .scale(cancelScale)
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onPress = {
-                                    isPressing = true
-                                    tryAwaitRelease()
-                                    isPressing = false
-                                },
-                                onLongPress = {
-                                    doHaptic()
-                                    viewModel.cancelTimer()
-                                }
-                            )
-                        },
+                        .height(60.dp),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
-                    border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = StatusRed,
+                        containerColor = StatusRed.copy(alpha = 0.08f)
+                    ),
+                    border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f)),
                     contentPadding = PaddingValues(0.dp)
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Rounded.Close, null, Modifier.size(20.dp))
                         Spacer(Modifier.height(2.dp))
-                        Text("Hold Cancel", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
 
@@ -226,7 +401,7 @@ fun HomeScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Rounded.Add, null, Modifier.size(20.dp))
                         Spacer(Modifier.height(2.dp))
-                        Text("+10m", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text("+${state.settings.extendMinutes}m", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
             }
@@ -310,6 +485,36 @@ fun HomeScreen(
                             )
                         }
                     }
+
+                    Spacer(Modifier.height(14.dp))
+                    Button(
+                        onClick = {
+                            doHaptic()
+                            viewModel.endNow()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Surface3,
+                            contentColor = TextPrimary
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.PowerSettingsNew,
+                            contentDescription = null,
+                            tint = StatusRed,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "End Now & Disconnect",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
                 } else {
@@ -318,19 +523,19 @@ fun HomeScreen(
                 minutes = state.selectedMinutes,
                 onMinutesChange = { viewModel.setMinutesEphemeral(it) },
                 onMinutesChangeFinished = { viewModel.saveMinutes(it) },
-                view = view,
                 hapticEnabled = hapticEnabled
             )
 
             // ── Smart Duration Suggestion ──────────────────────────────────
-            if (state.suggestedMinutes != null) {
-                Spacer(Modifier.height(12.dp))
+            val suggested = state.suggestedMinutes
+            if (suggested != null) {
+                Spacer(Modifier.height(8.dp))
                 Box(
                     modifier = Modifier
                         .background(AccentPurple.copy(0.1f), RoundedCornerShape(12.dp))
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { viewModel.applySuggestion(state.suggestedMinutes!!) }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .clickable { viewModel.applySuggestion(suggested) }
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -349,92 +554,280 @@ fun HomeScreen(
                 }
             }
 
-            Spacer(Modifier.weight(0.4f))
+            Spacer(Modifier.height(12.dp))
 
-            // ── Sleep Protection Overview Card ──────────────────────────────
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Surface2),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            // ── Quick Presets & Live 12-Hour End Time Preview ───────────────
+            val presets = listOf(15L, 30L, 45L, 60L)
+
+            if (isTutorialActive && tutorialStep == 1) {
+                Surface(
+                    color = (if (userInteractedWithDial) StatusGreen else AccentBlue).copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, (if (userInteractedWithDial) StatusGreen else AccentBlue).copy(alpha = 0.7f)),
+                    modifier = Modifier.padding(bottom = 8.dp)
                 ) {
-                    // Audio Fade status
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(AccentBlue.copy(0.12f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.VolumeDown,
-                                contentDescription = null,
-                                tint = AccentBlue,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                "Volume Fade",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                if (state.settings.playbackStopEnabled) "${state.settings.fadeOutDurationSeconds}s smooth fade" else "Disabled",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (state.settings.playbackStopEnabled) AccentBlue else TextSecondary
-                            )
-                        }
-                    }
+                    Text(
+                        text = if (userInteractedWithDial) "✓ ${state.selectedMinutes}m selected! Tap 'Next Step' in tutorial above" else "👆 Turn dial or tap any preset pill (15m, 30m, 45m, 60m)",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (userInteractedWithDial) StatusGreen else AccentBlue,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
 
-                    // Vertical Divider
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (isTutorialActive && tutorialStep == 1) {
+                            Modifier
+                                .border(
+                                    width = 2.dp,
+                                    brush = Brush.horizontalGradient(listOf(AccentBlue, AccentCyan, AccentPurple)),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .padding(4.dp)
+                        } else Modifier
+                    ),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                presets.forEach { presetMin ->
+                    val isSelected = state.selectedMinutes == presetMin
                     Box(
                         modifier = Modifier
-                            .height(28.dp)
-                            .width(1.dp)
-                            .background(Surface3)
-                    )
+                            .padding(horizontal = 4.dp)
+                            .background(
+                                if (isSelected) AccentBlue.copy(alpha = 0.2f) else Surface2,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isSelected) AccentBlue else Color.Transparent,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                viewModel.setMinutesEphemeral(presetMin)
+                                viewModel.saveMinutes(presetMin)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "${presetMin}m",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) AccentBlue else TextSecondary
+                        )
+                    }
+                }
+            }
 
-                    // Reconnect Blocker status
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(
-                                    if (state.settings.reconnectBlockerEnabled) StatusOrange.copy(0.12f) else TextSecondary.copy(0.12f),
-                                    CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Rounded.Shield,
-                                contentDescription = null,
-                                tint = if (state.settings.reconnectBlockerEnabled) StatusOrange else TextSecondary,
-                                modifier = Modifier.size(20.dp)
-                            )
+            var currentClockTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    kotlinx.coroutines.delay(10_000L)
+                    currentClockTime = System.currentTimeMillis()
+                }
+            }
+            val endTimeMs = currentClockTime + state.selectedMinutes * 60_000L
+            val endTimeFormatted = remember(endTimeMs / 60_000L) {
+                java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(endTimeMs))
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Schedule,
+                    contentDescription = null,
+                    tint = TextTertiary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "Timer ends at $endTimeFormatted",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // ── Live Connected Device & Battery Status ───────────────────────
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (isTutorialActive && tutorialStep == 3) {
+                            Modifier
+                                .border(
+                                    width = 2.dp,
+                                    brush = Brush.horizontalGradient(listOf(StatusGreen, AccentCyan)),
+                                    shape = RoundedCornerShape(20.dp)
+                                )
+                                .padding(2.dp)
+                        } else Modifier
+                    )
+            ) {
+                DeviceBatteryCard(devices = state.connectedDevices)
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // ── Interactive Sleep Protection Options Row ─────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Option 1: Volume Fade
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Surface2),
+                    border = if (isTutorialActive && tutorialStep == 2) {
+                        BorderStroke(
+                            2.dp,
+                            Brush.horizontalGradient(listOf(AccentPurple, AccentCyan))
+                        )
+                    } else null,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            if (state.settings.playbackStopEnabled) {
+                                showFadeDialog = true
+                            } else {
+                                doHaptic()
+                                viewModel.setPlaybackStop(true)
+                            }
                         }
-                        Spacer(Modifier.width(10.dp))
-                        Column {
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        if (isTutorialActive && tutorialStep == 2) {
                             Text(
-                                "Reconnect Block",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                if (state.settings.reconnectBlockerEnabled) "${state.settings.cooldownSeconds}s active block" else "Disabled",
+                                text = if (userInteractedWithFade) "✓ Configured!" else "👆 Tap to customize",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (state.settings.reconnectBlockerEnabled) StatusOrange else TextSecondary
+                                color = if (userInteractedWithFade) StatusGreen else AccentPurple,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(bottom = 4.dp)
                             )
                         }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(
+                                        if (state.settings.playbackStopEnabled) AccentBlue.copy(0.15f) else Surface3,
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.VolumeDown,
+                                    null,
+                                    tint = if (state.settings.playbackStopEnabled) AccentBlue else TextTertiary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Switch(
+                                checked = state.settings.playbackStopEnabled,
+                                onCheckedChange = {
+                                    doHaptic()
+                                    viewModel.setPlaybackStop(it)
+                                },
+                                modifier = Modifier.scale(0.8f),
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = AccentBlue
+                                )
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Volume Fade",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            if (state.settings.playbackStopEnabled) "${state.settings.fadeOutDurationSeconds}s (tap to set)" else "Disabled",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (state.settings.playbackStopEnabled) AccentBlue else TextTertiary
+                        )
+                    }
+                }
+
+                // Option 2: Reconnect Block
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Surface2),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            if (state.settings.reconnectBlockerEnabled) {
+                                showBlockDialog = true
+                            } else {
+                                doHaptic()
+                                viewModel.setReconnectBlocker(true)
+                            }
+                        }
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(
+                                        if (state.settings.reconnectBlockerEnabled) StatusOrange.copy(0.15f) else Surface3,
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Shield,
+                                    null,
+                                    tint = if (state.settings.reconnectBlockerEnabled) StatusOrange else TextTertiary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Switch(
+                                checked = state.settings.reconnectBlockerEnabled,
+                                onCheckedChange = {
+                                    doHaptic()
+                                    viewModel.setReconnectBlocker(it)
+                                },
+                                modifier = Modifier.scale(0.8f),
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = StatusOrange
+                                )
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Reconnect Block",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            if (state.settings.reconnectBlockerEnabled) "${state.settings.cooldownSeconds}s (tap to set)" else "Disabled",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (state.settings.reconnectBlockerEnabled) StatusOrange else TextTertiary
+                        )
                     }
                 }
             }
@@ -478,9 +871,44 @@ fun HomeScreen(
                     )
                 }
 
+            if (isTutorialActive && tutorialStep == 4) {
+                Surface(
+                    color = StatusGreen.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.7f)),
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    Text(
+                        text = "🚀 Tap 'Start Sleep Timer' to begin protection!",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = StatusGreen,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (isTutorialActive && tutorialStep == 4) {
+                            Modifier
+                                .border(
+                                    width = 2.5.dp,
+                                    brush = Brush.horizontalGradient(listOf(StatusGreen, AccentCyan, AccentBlue)),
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                                .padding(2.dp)
+                        } else Modifier
+                    )
+            ) {
                 Button(
                     onClick = {
                         doHaptic()
+                        if (isTutorialActive) {
+                            viewModel.setTutorialCompleted(true)
+                        }
                         viewModel.startTimer()
                     },
                     enabled = isEnabled,
@@ -506,6 +934,7 @@ fun HomeScreen(
                     )
                 }
             }
+            }
 
             if (!isEnabled) {
                 Spacer(Modifier.height(8.dp))
@@ -523,6 +952,40 @@ fun HomeScreen(
 
         Spacer(Modifier.height(32.dp))
     }
+
+    // ── Floating Docked Interactive In-App Tutorial Guided Tour ──
+    AnimatedVisibility(
+        visible = isTutorialActive,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+    ) {
+        Surface(
+            shape = RoundedCornerShape(22.dp),
+            shadowElevation = 16.dp,
+            tonalElevation = 8.dp,
+            color = Color.Transparent
+        ) {
+            com.smartbluetoothsleeptracker.ui.components.InteractiveTutorialBanner(
+                step = tutorialStep,
+                totalSteps = 4,
+                userInteractedWithDial = userInteractedWithDial,
+                userInteractedWithFade = userInteractedWithFade,
+                selectedMinutes = state.selectedMinutes,
+                onStepChange = { tutorialStep = it },
+                onComplete = {
+                    viewModel.setTutorialCompleted(true)
+                },
+                onSkip = {
+                    viewModel.setTutorialCompleted(true)
+                }
+            )
+        }
+    }
+}
 }
 
 // ── Connection Status Bar ──────────────────────────────────────────────
@@ -531,14 +994,32 @@ fun HomeScreen(
 private fun ConnectionStatusBar(
     devices: List<ConnectedDevice>,
     btEnabled: Boolean,
-    cooldownActive: Boolean,
-    isDisconnectReady: Boolean
+    cooldownActive: Boolean
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isClickableAction = (devices.isEmpty() || !btEnabled) && !cooldownActive
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .background(Surface2, RoundedCornerShape(16.dp))
+        .then(
+            if (isClickableAction) {
+                Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS).apply {
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
+                        }
+                    }
+            } else Modifier
+        )
+        .padding(horizontal = 16.dp, vertical = 14.dp)
+
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Surface2, RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier = rowModifier,
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Status dot
@@ -597,19 +1078,19 @@ private fun ConnectionStatusBar(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                            text = if (isDisconnectReady) "Ready" else "Unverified",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isDisconnectReady) StatusGreen else StatusOrange,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .background(
-                                    (if (isDisconnectReady) StatusGreen else StatusOrange).copy(0.12f),
-                                    RoundedCornerShape(6.dp)
-                                )
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
+                                text = "Connected",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = StatusGreen,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .background(
+                                        StatusGreen.copy(0.12f),
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     if (devs.size > 1) {
                         Text(
                             "+${devs.size - 1} more",
@@ -621,21 +1102,27 @@ private fun ConnectionStatusBar(
                 !btOn -> {
                     Text("Bluetooth Off", style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold, color = StatusRed)
+                    Text("Tap to turn on Bluetooth", style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary)
                 }
                 else -> {
                     Text("No device connected", style = MaterialTheme.typography.titleSmall,
                         color = TextSecondary)
+                    Text("Tap to connect earbuds", style = MaterialTheme.typography.labelSmall,
+                        color = TextTertiary)
                 }
             }
         }
     }
 
-        // Favorite indicator for primary device
+        // Action or Favorite indicator
         if (devices.isNotEmpty()) {
             val primary = devices.firstOrNull { it.isFavorite }
             if (primary != null) {
                 Icon(Icons.Rounded.Star, "Favorited", tint = AccentBlue, modifier = Modifier.size(18.dp))
             }
+        } else if (isClickableAction) {
+            Icon(Icons.Rounded.ChevronRight, "Open Bluetooth settings", tint = TextTertiary, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -1023,16 +1510,15 @@ private fun RotaryDial(
     minutes: Long,
     onMinutesChange: (Long) -> Unit,
     onMinutesChangeFinished: (Long) -> Unit,
-    view: android.view.View,
     hapticEnabled: Boolean = true
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val fraction = ((minutes - MIN_MIN).toFloat() / (MAX_MIN - MIN_MIN).toFloat()).coerceIn(0f, 1f)
     val sweepAngle = fraction * DIAL_SWEEP
 
-    var lastSnapped by remember { mutableStateOf(minutes) }
+    var lastSnapped by remember { mutableLongStateOf(minutes) }
     var centerPx by remember { mutableStateOf(Offset.Zero) }
-    var sizePx by remember { mutableStateOf(0f) }
+    var sizePx by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(minutes) {
         lastSnapped = minutes
@@ -1105,8 +1591,7 @@ private fun RotaryDial(
                                     dragStarted = true
                                 } else if (!dragStarted && elapsed >= longPressThreshold && !moved) {
                                     if (hapticEnabled) {
-                                        view.isHapticFeedbackEnabled = true
-                                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                        com.smartbluetoothsleeptracker.core.haptics.HapticManager.vibrateTick(context)
                                     }
                                     dragStarted = true
                                 }
@@ -1118,23 +1603,30 @@ private fun RotaryDial(
                                     val rawAngle = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
 
                                     val relativeAngle = (rawAngle.toFloat() - DIAL_START + 360f) % 360f
-                                    val snapped = if (relativeAngle > DIAL_SWEEP && relativeAngle < 345f) {
-                                        // In bottom dead gap — maintain closest bound to prevent wrap jump
-                                        if (lastSnapped < (MAX_MIN - MIN_MIN) / 2) MIN_MIN else MAX_MIN
+                                    val snapped = if (relativeAngle > DIAL_SWEEP) {
+                                        // In bottom dead gap (270°..360°) — clamp to nearest edge without jumping
+                                        if (relativeAngle >= 315f || lastSnapped <= 30L) {
+                                            MIN_MIN
+                                        } else {
+                                            MAX_MIN
+                                        }
                                     } else {
                                         val dialAngle = relativeAngle.coerceIn(0f, DIAL_SWEEP)
                                         val frac = dialAngle / DIAL_SWEEP
-                                        (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
+                                        val calculated = (MIN_MIN + (frac * (MAX_MIN - MIN_MIN)).toLong()).coerceIn(MIN_MIN, MAX_MIN)
+                                        // Prevent accidental wrap jumps during rapid gestures near edges
+                                        if (lastSnapped <= 10L && calculated >= 100L) {
+                                            MIN_MIN
+                                        } else if (lastSnapped >= 110L && calculated <= 20L) {
+                                            MAX_MIN
+                                        } else {
+                                            calculated
+                                        }
                                     }
 
                                     if (snapped != lastSnapped) {
                                         lastSnapped = snapped
                                         if (hapticEnabled) {
-                                            view.isHapticFeedbackEnabled = true
-                                            view.performHapticFeedback(
-                                                HapticFeedbackConstants.KEYBOARD_TAP,
-                                                HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
-                                            )
                                             com.smartbluetoothsleeptracker.core.haptics.HapticManager.vibrateTick(context)
                                         }
                                     }
@@ -1162,6 +1654,287 @@ private fun RotaryDial(
                 Spacer(Modifier.height(4.dp))
                 Text("minutes", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
             }
+        }
+    }
+}
+
+@Composable
+private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
+    val activeDevice = devices.firstOrNull()
+
+    if (activeDevice == null) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Surface2.copy(alpha = 0.65f)),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Bluetooth,
+                    contentDescription = null,
+                    tint = TextTertiary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Connect earbuds or neckband to view live battery",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary
+                )
+            }
+        }
+        return
+    }
+
+    val battery = activeDevice.battery ?: com.smartbluetoothsleeptracker.core.bluetooth.BatteryInfo()
+    val isEarbuds = activeDevice.type == com.smartbluetoothsleeptracker.data.db.DeviceType.EARBUDS
+
+    if (isEarbuds) {
+        // ── Earbuds: Left, Right, Case ──────────────────────────────
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Surface2),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .background(AccentPurple.copy(alpha = 0.15f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Headphones,
+                                contentDescription = null,
+                                tint = AccentPurple,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = activeDevice.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .background(Surface3, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "TWS Earbuds",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            color = TextSecondary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Left, Right, Case battery cells
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val leftLvl = when {
+                        battery.leftLevel in 0..100 -> battery.leftLevel
+                        battery.mainLevel in 0..100 -> battery.mainLevel
+                        battery.rightLevel in 0..100 -> battery.rightLevel
+                        else -> -1
+                    }
+                    val rightLvl = when {
+                        battery.rightLevel in 0..100 -> battery.rightLevel
+                        battery.mainLevel in 0..100 -> battery.mainLevel
+                        battery.leftLevel in 0..100 -> battery.leftLevel
+                        else -> -1
+                    }
+                    val caseLvl = if (battery.caseLevel in 0..100) battery.caseLevel else -1
+
+                    EarbudBatteryItem(
+                        label = "Left",
+                        level = leftLvl,
+                        icon = Icons.Rounded.Hearing
+                    )
+
+                    VerticalDivider(
+                        modifier = Modifier.height(26.dp),
+                        color = Surface3,
+                        thickness = 1.dp
+                    )
+
+                    EarbudBatteryItem(
+                        label = "Right",
+                        level = rightLvl,
+                        icon = Icons.Rounded.Hearing
+                    )
+
+                    VerticalDivider(
+                        modifier = Modifier.height(26.dp),
+                        color = Surface3,
+                        thickness = 1.dp
+                    )
+
+                    EarbudBatteryItem(
+                        label = "Case",
+                        level = caseLvl,
+                        icon = Icons.Rounded.Inbox,
+                        isCase = true
+                    )
+                }
+            }
+        }
+    } else {
+        // ── Single Device Battery Pill (Neckband, Headphones, or Unified TWS) ──
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Surface2),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .background(AccentBlue.copy(alpha = 0.12f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Headphones,
+                            contentDescription = null,
+                            tint = AccentBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = activeDevice.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val typeLabel = when (activeDevice.type) {
+                            com.smartbluetoothsleeptracker.data.db.DeviceType.NECKBAND -> "Neckband"
+                            com.smartbluetoothsleeptracker.data.db.DeviceType.EARBUDS -> "TWS Earbuds"
+                            com.smartbluetoothsleeptracker.data.db.DeviceType.WIRED_HEADPHONES -> "Wired Headphones"
+                            else -> "Connected Audio"
+                        }
+                        Text(
+                            text = typeLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+
+                // Battery Indicator Pill
+                val mainLvl = battery.mainLevel
+                val batteryColor = when {
+                    mainLvl >= 50 -> StatusGreen
+                    mainLvl in 20..49 -> StatusOrange
+                    mainLvl in 0..19 -> StatusRed
+                    else -> TextTertiary
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .background(batteryColor.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = when {
+                            mainLvl >= 80 -> Icons.Rounded.BatteryFull
+                            mainLvl >= 50 -> Icons.Rounded.Battery5Bar
+                            mainLvl >= 20 -> Icons.Rounded.Battery3Bar
+                            mainLvl in 0..19 -> Icons.Rounded.BatteryAlert
+                            else -> Icons.Rounded.Battery0Bar
+                        },
+                        contentDescription = null,
+                        tint = batteryColor,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (mainLvl in 0..100) "$mainLvl%" else "Connected",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = batteryColor
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EarbudBatteryItem(
+    label: String,
+    level: Int,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isCase: Boolean = false
+) {
+    val isKnown = level in 0..100
+    val color = when {
+        !isKnown && isCase -> StatusGreen
+        level >= 50 -> StatusGreen
+        level in 20..49 -> StatusOrange
+        level in 0..19 -> StatusRed
+        else -> AccentBlue
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Column {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+                color = TextTertiary
+            )
+            Text(
+                text = if (isKnown) "$level%" else if (isCase) "Good" else "Connected",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
         }
     }
 }

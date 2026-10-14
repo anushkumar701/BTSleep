@@ -51,16 +51,19 @@ class HealthViewModel(application: Application) : AndroidViewModel(application) 
                 dev == null || dev.deviceType.name !in excludedTypes
             }
 
+            // Pre-aggregate usage and sessions by date for O(1) lookups
+            val usageMinsByDate = usageList.groupBy { it.date }
+                .mapValues { entry -> entry.value.sumOf { it.totalMinutes } }
+            val sessionMinsByDate = validSessions.groupBy { it.date }
+                .mapValues { entry -> entry.value.sumOf { it.actualDurationMin ?: 0 } }
+
             // Build 7-day chart (trailing 7 days)
             val weeklyData = (0..6).map { offset ->
                 val d = weekAgo.plusDays(offset.toLong())
                 val dateStr = d.format(fmt)
                 
-                // Sum from daily_usage
-                val usageMins = usageList.filter { it.date == dateStr }.sumOf { it.totalMinutes }
-                // Sum from sessions (if daily_usage was missing or lower)
-                val sessionMins = validSessions.filter { it.date == dateStr }.sumOf { it.actualDurationMin ?: 0 }
-
+                val usageMins = usageMinsByDate[dateStr] ?: 0
+                val sessionMins = sessionMinsByDate[dateStr] ?: 0
                 val dayMins = maxOf(usageMins, sessionMins)
                 val label = if (d == today) "Today"
                 else d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
@@ -86,8 +89,8 @@ class HealthViewModel(application: Application) : AndroidViewModel(application) 
 
             while (streakActive) {
                 val dStr = checkDate.format(fmt)
-                val uMins = usageList.filter { it.date == dStr }.sumOf { it.totalMinutes }
-                val sMins = validSessions.filter { it.date == dStr }.sumOf { it.actualDurationMin ?: 0 }
+                val uMins = usageMinsByDate[dStr] ?: 0
+                val sMins = sessionMinsByDate[dStr] ?: 0
                 val dMins = maxOf(uMins, sMins)
 
                 if (dMins > 60) {

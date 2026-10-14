@@ -38,11 +38,11 @@ data class UndoActionState(
 enum class PendingActionType { REMOVE_DEVICE, RESET_USAGE }
 
 data class UsageUiState(
-    val period: UsagePeriod = UsagePeriod.WEEK,
+    val period: UsagePeriod = UsagePeriod.TODAY,
     val sessions: List<SessionEntity> = emptyList(),
     val deviceStats: List<DeviceUsageStat> = emptyList(),
     val chartItems: List<ChartBarItem> = emptyList(),
-    val chartTitle: String = "Last 7 Days",
+    val chartTitle: String = "Today's Hourly Usage",
     val totalMinutes: Int = 0,
     val totalSessions: Int = 0,
     val totalDevices: Int = 0,
@@ -56,7 +56,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(UsageUiState())
     val state: StateFlow<UsageUiState> = _state.asStateFlow()
 
-    private val _period = MutableStateFlow(UsagePeriod.WEEK)
+    private val _period = MutableStateFlow(UsagePeriod.TODAY)
     private var pendingJob: Job? = null
 
     init {
@@ -81,7 +81,6 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val toStr = to.format(fmt)
 
         app.db.sessionDao().deleteEmptySessions()
-        app.db.sessionDao().deleteEmptySessions()
         app.db.sessionDao().pruneOldSessions(500)
 
         // Fetch raw sessions and daily usage in date range
@@ -89,7 +88,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val dailyUsages = app.db.dailyUsageDao().usageInRangeNow(fromStr, toStr)
 
         val sessions = rawSessions
-            .filter { (it.actualDurationMin ?: 0) > 0 || it.plannedDurationMin > 0 }
+            .filter { (it.actualDurationMin ?: 0) > 0 || (it.endTime == null && it.plannedDurationMin > 0) }
             .distinctBy { it.id }
             .sortedByDescending { it.startTime }
             .toMutableList()
@@ -103,7 +102,8 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         activeAddrs.forEach { addr ->
             val startTime = BluetoothReceiver.getActiveConnectTime(app, addr)
             if (startTime > 0L && now > startTime) {
-                val liveMin = ((now - startTime) / 60_000L).toInt()
+                val durationMs = now - startTime
+                val liveMin = com.smartbluetoothsleeptracker.service.TimerCalculations.calculateDurationMinutes(durationMs)
                 if (liveMin > 0) {
                     liveMinutesMap[addr] = liveMin
                 }
@@ -116,30 +116,37 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val stats = deviceAddrs.mapNotNull { addr ->
             val dev = app.db.deviceDao().getDevice(addr) ?: return@mapNotNull null
             val devSessions = sessions.filter { it.deviceAddress == addr }
-            val sessionMins = devSessions.sumOf { it.actualDurationMin ?: it.plannedDurationMin }
+            val sessionMins = devSessions.sumOf { if (it.endTime == null) 0 else (it.actualDurationMin ?: 0) }
             val dailyMins = dailyUsages.filter { it.deviceAddress == addr }.sumOf { it.totalMinutes }
             val baseMins = maxOf(sessionMins, dailyMins)
             val liveMins = liveMinutesMap[addr] ?: 0
             val totalMins = baseMins + liveMins
 
             val dailyCount = dailyUsages.filter { it.deviceAddress == addr }.sumOf { it.sessionCount }
+            val completedCount = devSessions.count { it.endTime != null && (it.actualDurationMin ?: 0) > 0 }
             val hasActiveNoRecentSession = liveMins > 0 && devSessions.none { it.endTime != null && (now - it.endTime) < 60_000 }
-            val count = maxOf(devSessions.size, dailyCount) + (if (hasActiveNoRecentSession) 1 else 0)
+            val count = maxOf(completedCount, dailyCount) + (if (hasActiveNoRecentSession) 1 else 0)
 
             DeviceUsageStat(dev, totalMins, count)
         }.sortedByDescending { it.totalMinutes }
 
-        // ── Unified Chart Bar Items (Sessions + Daily Usage + Live Minutes) ──
+        // ── Unified Chart Bar Items (12-Hour Format & Accurate Accounting) ──
         val chartBars = when (period) {
             UsagePeriod.TODAY -> {
                 val currentHour = LocalDateTime.now().hour
                 val currentBucket = (currentHour / 4) * 4
                 (0..20 step 4).map { h ->
-                    val label = String.format(java.util.Locale.ROOT, "%02d:00", h)
+                    val label = when (h) {
+                        0 -> "12 AM"
+                        12 -> "12 PM"
+                        in 1..11 -> "$h AM"
+                        else -> "${h - 12} PM"
+                    }
                     var hourMins = sessions.filter {
+                        if (it.endTime == null) return@filter false
                         val sTime = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(it.startTime), ZoneId.systemDefault())
                         sTime.toLocalDate() == today && sTime.hour in h until (h + 4)
-                    }.sumOf { it.actualDurationMin ?: it.plannedDurationMin }
+                    }.sumOf { it.actualDurationMin ?: 0 }
 
                     val isCurrent = (h == currentBucket)
                     if (isCurrent && totalLiveMinutes > 0) {
@@ -153,7 +160,9 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                     val d = from.plusDays(offset.toLong())
                     val dStr = d.format(fmt)
                     val label = if (d == today) "Today" else d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
-                    val sessMins = sessions.filter { it.date == dStr }.sumOf { it.actualDurationMin ?: it.plannedDurationMin }
+                    val sessMins = sessions.filter { it.date == dStr }.sumOf {
+                        if (it.endTime == null) 0 else (it.actualDurationMin ?: 0)
+                    }
                     val dailyMins = dailyUsages.filter { it.date == dStr }.sumOf { it.totalMinutes }
                     var dayMins = maxOf(sessMins, dailyMins)
                     if (d == today && totalLiveMinutes > 0) {
@@ -174,7 +183,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                         } catch (e: Exception) {
                             false
                         }
-                    }.sumOf { it.actualDurationMin ?: it.plannedDurationMin }
+                    }.sumOf { if (it.endTime == null) 0 else (it.actualDurationMin ?: 0) }
                     val dailyMins = dailyUsages.filter {
                         try {
                             val d = LocalDate.parse(it.date, fmt)
@@ -217,6 +226,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
             val dev = app.db.deviceDao().getDevice(address) ?: return@launch
             app.db.deviceDao().setFavorite(address, !dev.isFavorite)
             loadData(_period.value)
+            app.btMonitor.refresh()
         }
     }
 
@@ -336,6 +346,57 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
             loadData(_period.value)
             delay(300)
             _state.update { it.copy(isRefreshing = false) }
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun testDisconnect(address: String) {
+        viewModelScope.launch {
+            val btManager = app.getSystemService(android.content.Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
+            val adapter = btManager?.adapter
+            val device = try {
+                adapter?.getRemoteDevice(address)
+            } catch (_: Exception) {
+                null
+            }
+            if (device == null || adapter == null || !adapter.isEnabled) {
+                android.widget.Toast.makeText(app, "Bluetooth is off or device not found", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            // 1. Verify device is ACTUALLY connected before running disconnect test
+            val isInitiallyConnected = app.disconnector.isDeviceActuallyConnected(device)
+            if (!isInitiallyConnected) {
+                android.widget.Toast.makeText(
+                    app,
+                    "Device is not connected. Please connect ${device.name ?: address} first to test disconnection.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+
+            android.widget.Toast.makeText(app, "Testing disconnect for ${device.name ?: address}...", android.widget.Toast.LENGTH_SHORT).show()
+            val result = app.disconnector.disconnectSingleDevice(device, allowSystemDialog = false)
+            var verifiedDisconnected = result.success && result.methodUsed != null
+            if (!verifiedDisconnected && result.methodsTried.any { it.second }) {
+                // Polling confirmation if stack disconnect lag occurred
+                for (i in 1..5) {
+                    kotlinx.coroutines.delay(500L)
+                    val stillConn = app.disconnector.isDeviceActuallyConnected(device)
+                    if (!stillConn) {
+                        verifiedDisconnected = true
+                        break
+                    }
+                }
+            }
+
+            if (verifiedDisconnected && result.methodUsed != null) {
+                app.db.deviceDao().setWorkingMethod(device.address, result.methodUsed)
+                android.widget.Toast.makeText(app, "✓ Device disconnected successfully!", android.widget.Toast.LENGTH_LONG).show()
+            } else {
+                android.widget.Toast.makeText(app, "Disconnect test failed. Ensure Bluetooth is active and try again.", android.widget.Toast.LENGTH_LONG).show()
+            }
+            loadData(_period.value)
         }
     }
 }

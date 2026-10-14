@@ -55,6 +55,7 @@ fun AppNavigation(
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
 
     val view = androidx.compose.ui.platform.LocalView.current
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         modifier = modifier,
@@ -75,6 +76,7 @@ fun AppNavigation(
                                 if (homeState.settings.hapticFeedbackEnabled) {
                                     view.isHapticFeedbackEnabled = true
                                     view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                    com.smartbluetoothsleeptracker.core.haptics.HapticManager.vibrateClick(context)
                                 }
                                 navController.navigate(Tab.Home.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -125,10 +127,6 @@ fun AppNavigation(
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = {
-                                    if (homeState.settings.hapticFeedbackEnabled) {
-                                        view.isHapticFeedbackEnabled = true
-                                        view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
-                                    }
                                     navController.navigate(tab.route) {
                                         popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                         launchSingleTop = true
@@ -177,6 +175,13 @@ fun AppNavigation(
                 val settingsVm: SettingsViewModel = viewModel()
                 SettingsScreen(
                     viewModel = settingsVm,
+                    onNavigateToHome = {
+                        navController.navigate(Tab.Home.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                     onNavigateToPrivacyPolicy = { navController.navigate(Routes.PRIVACY_POLICY) },
                     onNavigateToTermsOfService = { navController.navigate(Routes.TERMS_OF_SERVICE) }
                 )

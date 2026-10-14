@@ -20,19 +20,21 @@ class ShakeDetector(
 
     companion object {
         private const val TAG = "ShakeDetector"
-        // Acceleration threshold for shake detection (in m/s^2)
-        // 13.0 m/s^2 represents a deliberate gentle shake/nudge above normal gravity (9.8 m/s^2)
-        private const val SHAKE_THRESHOLD_GRAVITY = 13.5f
-        private const val SHAKE_SLOP_TIME_MS = 500L
+        // 18.5 m/s^2 represents a deliberate intentional shake, well above normal gravity (9.8 m/s^2) and bed movement
+        private const val SHAKE_THRESHOLD_GRAVITY = 18.5f
+        private const val SHAKE_RESET_TIMEOUT_MS = 1000L
     }
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
     private val accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private var isListening = false
+    private var shakeCount = 0
     private var lastShakeTimestamp = 0L
 
     fun startListening() {
         if (isListening || accelerometer == null) return
+        shakeCount = 0
+        lastShakeTimestamp = 0L
         isListening = sensorManager?.registerListener(
             this,
             accelerometer,
@@ -45,6 +47,7 @@ class ShakeDetector(
         if (!isListening) return
         sensorManager?.unregisterListener(this)
         isListening = false
+        shakeCount = 0
         Log.d(TAG, "ShakeDetector stopped listening")
     }
 
@@ -59,12 +62,20 @@ class ShakeDetector(
 
         if (gForce > SHAKE_THRESHOLD_GRAVITY) {
             val now = System.currentTimeMillis()
-            if (lastShakeTimestamp + SHAKE_SLOP_TIME_MS > now) {
-                return
+            if (now - lastShakeTimestamp > SHAKE_RESET_TIMEOUT_MS) {
+                shakeCount = 1
+                lastShakeTimestamp = now
+                Log.d(TAG, "First deliberate shake pulse detected (gForce=$gForce)")
+            } else if (now - lastShakeTimestamp > 250L) {
+                // Second shake within 1 second, separated by at least 250ms
+                shakeCount++
+                lastShakeTimestamp = now
+                if (shakeCount >= 2) {
+                    Log.i(TAG, "Deliberate double-shake confirmed! Triggering onShake callback")
+                    shakeCount = 0
+                    onShake()
+                }
             }
-            lastShakeTimestamp = now
-            Log.i(TAG, "Shake detected (gForce=$gForce)! Triggering onShake callback")
-            onShake()
         }
     }
 

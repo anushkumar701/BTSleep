@@ -99,8 +99,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             name = "Battery Optimization",
             description = "Keeps timer running in background",
             granted = pm.isIgnoringBatteryOptimizations(ctx.packageName),
-            settingsAction = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-            settingsUri = "package:${ctx.packageName}"
+            settingsAction = Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
         ))
 
         // 4. Device Admin
@@ -144,4 +143,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     // Appearance
     fun setThemeMode(mode: String)        = viewModelScope.launch { app.prefs.setThemeMode(mode) }
+
+    // Telemetry & Privacy
+    fun setAnalyticsEnabled(on: Boolean)  = viewModelScope.launch {
+        app.prefs.setAnalyticsEnabled(on)
+    }
+
+    // Interactive Tutorial
+    fun setTutorialCompleted(done: Boolean) = viewModelScope.launch {
+        app.prefs.setTutorialCompleted(done)
+    }
 }

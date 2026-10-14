@@ -51,16 +51,16 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                 "is not available on the Google Play Store."
             }
 
-            LegalSection("Data Collection & Firebase") {
-                "SleepBT uses Firebase Analytics, Cloud Messaging (FCM), and Firebase Authentication (anonymous) solely to count active installs and aggregate user activity.\n\n" +
-                "The app registers an anonymous push notification token (not used to send visible notifications) solely to estimate install and uninstall counts. No personal data is collected.\n\n" +
-                "An anonymous device identifier (UID) along with install (installedAt) and last-active (lastActiveAt) timestamps are stored in Firebase Cloud Firestore.\n\n" +
-                "No personal information, real identity, device name, or Bluetooth usage data is ever sent to Firebase or external servers. All audio session metrics and device presets remain 100% on your device."
+            LegalSection("Data Collection & Telemetry") {
+                "SleepBT is built with privacy-first principles. All core timer, volume fading, and Bluetooth control functions operate 100% locally on your device with zero remote tracking or analytics.\n\n" +
+                "• No Remote Telemetry: No crash traces, user identifiers, analytics, or device data are sent to any remote servers.\n\n" +
+                "• Update Notifications: The app checks GitHub's public releases API at most once per 24 hours to notify you if an update is available. Updates open safely in your web browser.\n\n" +
+                "• Local Storage: All sleep session history, connected device logs, and timer settings are stored strictly on your device inside a local SQLite database."
             }
 
-            LegalSection("Data Deletion") {
-                "You can clear all session and usage data from Settings > Usage > Clear All. " +
-                "Uninstalling the app removes all stored data from your device."
+            LegalSection("Data Deletion & Controls") {
+                "You can clear all recorded usage and session history from the Usage screen. " +
+                "Uninstalling the app immediately deletes all stored data."
             }
 
             LegalSection("Changes") {
@@ -119,15 +119,15 @@ fun TermsOfServiceScreen(onBack: () -> Unit) {
                 "• Disconnects paired Bluetooth audio devices when the timer expires\n" +
                 "• Optionally stops media playback with a gradual volume fade\n" +
                 "• Optionally locks the screen on timer expiry\n" +
-                "• Tracks listening duration for ear health awareness\n\n" +
+                "• Tracks device connected duration for awareness\n\n" +
                 "The app is designed for personal, non-commercial use and is distributed " +
                 "as a sideloaded APK only."
             }
 
-            LegalSection("Local-Only Operation") {
-                "All data processing, storage, and device control actions happen entirely on your " +
-                "device. SleepBT has no server infrastructure, no cloud storage, and makes no " +
-                "network requests. Your data never leaves your device."
+            LegalSection("Network & Telemetry") {
+                "SleepBT's sleep timer, media attenuation, and Bluetooth disconnection operate locally. " +
+                "Network communication is limited to anonymous crash reporting (Crashlytics), " +
+                "optional anonymous active install counts, and 24-hour periodic update availability checks against GitHub releases."
             }
 
             LegalSection("Bluetooth & System Control") {
@@ -140,9 +140,9 @@ fun TermsOfServiceScreen(onBack: () -> Unit) {
                 "success on every hardware and software combination."
             }
 
-            LegalSection("Health Disclaimer") {
-                "The Ear Health feature is NOT medical advice. It provides rough estimates of " +
-                "listening duration only. It does not measure volume levels, sound pressure, or " +
+            LegalSection("Connected Time Disclaimer") {
+                "The Connected Time tracking feature is NOT medical advice. It provides estimates of " +
+                "Bluetooth connection duration only. It does not measure volume levels, sound pressure, or " +
                 "any physiological data.\n\n" +
                 "Consult a healthcare professional for concerns about hearing health."
             }
@@ -171,6 +171,11 @@ fun TermsOfServiceScreen(onBack: () -> Unit) {
             LegalSection("Changes") {
                 "These terms may be updated in future versions of the app. Continued use " +
                 "after an update constitutes acceptance of the revised terms."
+            }
+
+            LegalSection("Feedback & Queries") {
+                "For feedback, support inquiries, and bug reports, please contact " +
+                "the developer at midnightcompiler01@gmail.com."
             }
 
             Spacer(Modifier.height(24.dp))

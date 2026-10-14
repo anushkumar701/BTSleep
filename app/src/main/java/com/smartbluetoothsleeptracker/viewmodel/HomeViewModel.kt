@@ -41,32 +41,25 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
 
-    private val tickReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                "com.sleepbt.TICK" -> {
-                    val remaining = intent.getLongExtra("remaining", 0L)
-                    _state.update { it.copy(remainingMs = remaining, isTimerRunning = remaining > 0) }
-                }
-                "com.sleepbt.TIMER_END" -> {
-                    _state.update { it.copy(isTimerRunning = false, remainingMs = 0L, isPaused = false) }
+    init {
+        // Observe shared timer state flow
+        viewModelScope.launch {
+            app.timerState.collect { timer ->
+                if (timer.isRunning) {
+                    _state.update { it.copy(
+                        isTimerRunning = true,
+                        isPaused = timer.isPaused,
+                        remainingMs = timer.remainingMs
+                    ) }
+                } else {
+                    _state.update { it.copy(
+                        isTimerRunning = false,
+                        isPaused = false,
+                        remainingMs = 0L
+                    ) }
                 }
             }
         }
-    }
-
-    init {
-        // Register tick receiver
-        val filter = IntentFilter().apply {
-            addAction("com.sleepbt.TICK")
-            addAction("com.sleepbt.TIMER_END")
-        }
-        androidx.core.content.ContextCompat.registerReceiver(
-            application,
-            tickReceiver,
-            filter,
-            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
-        )
 
         // Observe settings
         viewModelScope.launch {
@@ -78,16 +71,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 // If end time is in the past and not paused, clear stale state
                 if (endClock != null && endClock <= now && !paused) {
                     app.prefs.clearTimer()
+                    _state.update { it.copy(
+                        settings = settings.copy(timerEndWallClock = null),
+                        isTimerRunning = false,
+                        isPaused = false,
+                        remainingMs = 0L
+                    ) }
                     return@collect
                 }
 
+                val running = (endClock != null && endClock > now) || paused || app.timerState.value.isRunning
                 _state.update { it.copy(
                     settings = settings,
                     selectedMinutes = settings.selectedMinutes,
                     lastUsedPreset = settings.lastUsedPreset,
-                    isTimerRunning = (endClock != null && endClock > now) || paused,
-                    isPaused = paused,
-                    remainingMs = settings.timerPausedRemaining ?: (endClock?.minus(now)?.coerceAtLeast(0L) ?: 0L)
+                    isTimerRunning = running,
+                    isPaused = paused || (running && app.timerState.value.isPaused),
+                    remainingMs = if (!running) 0L else (settings.timerPausedRemaining ?: (endClock?.minus(now)?.coerceAtLeast(0L) ?: app.timerState.value.remainingMs))
                 ) }
             }
         }
@@ -97,10 +97,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             while (isActive) {
                 val current = _state.value
                 if (current.isTimerRunning && !current.isPaused) {
-                    val endClock = current.settings.timerEndWallClock
+                    val endClock = current.settings.timerEndWallClock ?: app.timerState.value.endTimeMillis.takeIf { it > 0L }
                     if (endClock != null) {
                         val rem = (endClock - System.currentTimeMillis()).coerceAtLeast(0L)
-                        _state.update { it.copy(remainingMs = rem, isTimerRunning = rem > 0) }
+                        if (rem <= 0L) {
+                            _state.update { it.copy(remainingMs = 0L, isTimerRunning = false) }
+                        } else {
+                            _state.update { it.copy(remainingMs = rem, isTimerRunning = true) }
+                        }
+                    } else if (!app.timerState.value.isRunning) {
+                        _state.update { it.copy(isTimerRunning = false, remainingMs = 0L) }
                     }
                 }
                 delay(1000L)
@@ -247,6 +253,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun pauseTimer() {
+        _state.update { it.copy(isPaused = true) }
         val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
             action = TimerService.ACTION_PAUSE
         }
@@ -254,6 +261,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resumeTimer() {
+        _state.update { it.copy(isPaused = false) }
         val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
             action = TimerService.ACTION_RESUME
         }
@@ -261,10 +269,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cancelTimer() {
+        _state.update { it.copy(isTimerRunning = false, isPaused = false, remainingMs = 0L) }
+        viewModelScope.launch {
+            app.prefs.clearTimer()
+        }
         val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
             action = TimerService.ACTION_CANCEL
         }
         getApplication<Application>().startService(intent)
+        HapticManager.vibrateClick(getApplication())
+        android.widget.Toast.makeText(getApplication(), "Sleep timer cancelled", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     fun extendTimer() {
@@ -275,10 +289,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun endNow() {
+        _state.update { it.copy(isTimerRunning = false, isPaused = false, remainingMs = 0L) }
+        viewModelScope.launch {
+            app.prefs.clearTimer()
+        }
         val intent = Intent(getApplication<Application>(), TimerService::class.java).apply {
             action = TimerService.ACTION_END_NOW
         }
         getApplication<Application>().startService(intent)
+        HapticManager.vibrateClick(getApplication())
+        android.widget.Toast.makeText(getApplication(), "Ending timer & disconnecting...", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     fun allowReconnect() {
@@ -288,8 +308,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         getApplication<Application>().startService(intent)
     }
 
-    override fun onCleared() {
-        runCatching { getApplication<Application>().unregisterReceiver(tickReceiver) }
-        super.onCleared()
+    fun setPlaybackStop(enabled: Boolean) {
+        viewModelScope.launch { app.prefs.setPlaybackStop(enabled) }
+    }
+
+    fun setFadeOutDurationSeconds(seconds: Int) {
+        viewModelScope.launch { app.prefs.setFadeOutDuration(seconds) }
+    }
+
+    fun setReconnectBlocker(enabled: Boolean) {
+        viewModelScope.launch { app.prefs.setReconnectBlocker(enabled) }
+    }
+
+    fun setCooldownSeconds(seconds: Int) {
+        viewModelScope.launch { app.prefs.setCooldownSeconds(seconds) }
+    }
+
+    fun setTutorialCompleted(enabled: Boolean) {
+        viewModelScope.launch { app.prefs.setTutorialCompleted(enabled) }
     }
 }

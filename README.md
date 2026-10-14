@@ -45,7 +45,7 @@ Falling asleep while listening to audiobooks, podcasts, white noise, or music is
 ### 🎧 Multi-Protocol Reflective Bluetooth Disconnection
 - **Profile Teardown**: Systematically decouples devices across **A2DP** (Media Audio), **HFP/HSP** (Call Audio), **LE Audio**, and **ACL** link layers.
 - **Post-Timer Reconnection Blocker**: Enforces an active post-disconnect cooldown window (up to 120s) to prevent earbuds from immediately reconnecting if bumped.
-- **Wired & Bluetooth Support**: Tracks usage and timer control across Bluetooth earbuds, headphones, speakers, and wired (3.5mm & USB-C) headsets.
+- **Wired & Bluetooth Support**: Supports sleep timer volume fade and playback pause for both Bluetooth devices and wired (3.5mm & USB-C) headphones.
 
 ### 🛡️ Real-World Sleep Enhancements
 - **Active Audio Auto-Extend**: Detects if you are still actively listening when the timer expires and automatically extends countdown by configured minutes.
@@ -54,9 +54,9 @@ Falling asleep while listening to audiobooks, podcasts, white noise, or music is
 - **Quick Settings Tile**: Start or stop your favorite timer preset directly from the Android Quick Settings shade with a single tap.
 - **Automatic Screen Lock**: Securely locks your phone screen via the Android Device Admin API (`DevicePolicyManager.lockNow()`).
 
-### 📊 Ear Health Monitoring & Usage Analytics
-- **WHO Hearing Safety Gauge**: Visual arc indicator categorizing your daily earbud usage into **Safe**, **Moderate**, or **High Risk** zones based on WHO daily exposure recommendations.
-- **Local SQLite History**: Stores past sleep sessions and weekly trends in a private Room database with zero cloud telemetry.
+### 📊 Connected Time & Usage History
+- **Connected Duration Breakdown**: Visual chart and streak tracker for daily Bluetooth audio device connected time.
+- **Local SQLite History**: Stores past sleep sessions and weekly trends in a private Room database on your device.
 
 ---
 
@@ -109,15 +109,15 @@ com.smartbluetoothsleeptracker
  │    ├── haptics                  # Tactile feedback engine
  │    ├── screen                   # Device Admin screen lock controller
  │    ├── sensor                   # Shake-to-Extend accelerometer detector
- │    └── update                   # In-app GitHub release update checker
+ │    └── update                   # Lightweight GitHub release update checker
  ├── data
  │    ├── db                       # Room database, DAOs, & entities
  │    └── prefs                    # Jetpack DataStore preferences
  ├── service
- │    ├── TimerService.kt          # Foreground timer service with partial WakeLock
+ │    ├── TimerService.kt          # Foreground timer service with partial WakeLock & AlarmManager backstop
  │    └── SleepBTTileService.kt    # Android Quick Settings shade tile
  ├── ui
- │    ├── screens                  # Compose screens (Home, Usage, Health, Settings, Legal)
+ │    ├── screens                  # Compose screens (Home, Usage, Health/Connected, Settings, Legal)
  │    └── theme                    # OLED Dark Theme ("Midnight Pulse")
  └── viewmodel                     # StateFlow-driven MVVM viewmodels
 ```
@@ -126,18 +126,24 @@ com.smartbluetoothsleeptracker
 - **Asynchronous Execution**: Kotlin Coroutines, `StateFlow`, and `SharedFlow`.
 - **UI Engine**: 100% Declarative Jetpack Compose using Material 3 design tokens.
 - **Persistence**: Jetpack Room SQLite (`sleepbt.db`) & Jetpack Preferences DataStore (`sleepbt_prefs`).
-- **Foreground Reliability**: Foreground Service with `FOREGROUND_SERVICE_MEDIA_PLAYBACK` permission and partial CPU wake-lock to resist aggressive OEM battery killers.
+- **Foreground Reliability**: Foreground Service with `FOREGROUND_SERVICE_CONNECTED_DEVICE` permission and partial CPU wake-lock to resist aggressive OEM battery killers.
 
 ---
 
 ## 🔒 Privacy & Permissions Transparency
 
-SleepBT is **100% offline-first**. No analytics, no advertising SDKs, and no tracking libraries are bundled.
+SleepBT is built with local-first privacy principles. Core features (timer, volume fading, Bluetooth disconnection, local history) run 100% locally on your device without internet dependency.
 
+### Network Usage Transparency
+- **100% Offline Core**: No remote analytics, telemetry, or user tracking services.
+- **Update Checks**: The app queries the public GitHub Releases API at most once per 24 hours to notify you of available updates. Updates open safely in your web browser.
+
+### Permissions
 | Permission | Purpose |
 |---|---|
 | `BLUETOOTH_CONNECT` | Query connected audio devices and perform profile disconnection. |
-| `FOREGROUND_SERVICE` | Ensure timer accurately counts down without being killed in sleep mode. |
+| `CHANGE_NETWORK_STATE` | Normal install-time permission qualifying `connectedDevice` foreground service on Android 14/15. |
+| `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_CONNECTED_DEVICE` | Ensure timer accurately counts down without being killed in sleep mode. |
 | `POST_NOTIFICATIONS` | Display remaining time, lock screen controls, and warning alerts. |
 | `WAKE_LOCK` | Prevent CPU from deep-sleeping during the final seconds of countdown. |
 | `VIBRATE` | Deliver tactile haptic ticks during dial rotation and button actions. |
@@ -151,7 +157,7 @@ SleepBT is **100% offline-first**. No analytics, no advertising SDKs, and no tra
 Download the latest signed production APK from the [Releases Page](https://github.com/anushkumar701/BTSleep/releases/latest):
 - **File**: `SleepBT-v1.0.2.apk`
 - **Requires**: Android 11.0 (API level 30) or higher.
-- **Supported ABIs**: `arm64-v8a`, `armeabi-v7a` (universal modern Android compatibility).
+- **Supported ABIs**: Universal modern Android compatibility.
 
 ### Option 2: Build From Source
 

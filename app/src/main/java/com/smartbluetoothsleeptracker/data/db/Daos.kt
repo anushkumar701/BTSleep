@@ -142,6 +142,15 @@ interface DailyUsageDao {
     @Upsert
     suspend fun upsert(usage: DailyUsageEntity)
 
+    @Query("""
+        INSERT INTO daily_usage (date, device_address, total_minutes, session_count)
+        VALUES (:date, :deviceAddress, :minutes, 1)
+        ON CONFLICT(date, device_address) DO UPDATE SET
+        total_minutes = total_minutes + :minutes,
+        session_count = session_count + 1
+    """)
+    suspend fun recordUsage(date: String, deviceAddress: String, minutes: Int)
+
     @Query("DELETE FROM daily_usage WHERE device_address = :address")
     suspend fun deleteForDevice(address: String)
 

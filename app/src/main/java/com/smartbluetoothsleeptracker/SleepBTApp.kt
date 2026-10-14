@@ -9,6 +9,22 @@ import com.smartbluetoothsleeptracker.core.screen.ScreenController
 import com.smartbluetoothsleeptracker.data.db.AppDatabase
 import com.smartbluetoothsleeptracker.data.prefs.AppPrefs
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
+data class ActiveTimerState(
+    val isRunning: Boolean = false,
+    val isPaused: Boolean = false,
+    val remainingMs: Long = 0L,
+    val endTimeMillis: Long = 0L,
+    val plannedMinutes: Int = 0,
+    val extendedMinutes: Int = 0,
+    val targetAddresses: List<String> = emptyList()
+)
+
 class SleepBTApp : Application() {
 
     lateinit var db: AppDatabase
@@ -18,6 +34,17 @@ class SleepBTApp : Application() {
     lateinit var playbackController: PlaybackController
     lateinit var screenController: ScreenController
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+
+    private val _timerState = MutableStateFlow(ActiveTimerState())
+    val timerState: StateFlow<ActiveTimerState> = _timerState.asStateFlow()
+
+    fun updateTimerState(state: ActiveTimerState) {
+        _timerState.value = state
+    }
+
+    fun updateTimerState(transform: (ActiveTimerState) -> ActiveTimerState) {
+        _timerState.value = transform(_timerState.value)
+    }
 
     override fun onCreate() {
         super.onCreate()

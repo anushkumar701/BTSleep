@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -45,7 +46,8 @@ fun UsageScreen(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var selectedDevice by remember { mutableStateOf<DeviceUsageStat?>(null) }
+    var selectedDeviceAddress by remember { mutableStateOf<String?>(null) }
+    val selectedDevice = state.deviceStats.find { it.device.address == selectedDeviceAddress }
     var showClearDialog by remember { mutableStateOf(false) }
 
     if (showClearDialog) {
@@ -70,16 +72,18 @@ fun UsageScreen(
     // Device bottom sheet
     if (selectedDevice != null) {
         DeviceBottomSheet(
-            stat = selectedDevice!!,
-            onDismiss = { selectedDevice = null },
+            stat = selectedDevice,
+            onDismiss = { selectedDeviceAddress = null },
             onToggleFavorite = { viewModel.toggleFavorite(it) },
-            onResetUsage = { viewModel.scheduleResetUsage(it); selectedDevice = null },
-            onRemoveDevice = { viewModel.scheduleRemoveDevice(it); selectedDevice = null },
+            onTestDisconnect = { viewModel.testDisconnect(it) },
+            onResetUsage = { viewModel.scheduleResetUsage(it); selectedDeviceAddress = null },
+            onRemoveDevice = { viewModel.scheduleRemoveDevice(it); selectedDeviceAddress = null },
             onSetType = { addr, type -> viewModel.setDeviceType(addr, type) }
         )
     }
 
     val view = androidx.compose.ui.platform.LocalView.current
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Box(modifier = modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -122,6 +126,7 @@ fun UsageScreen(
                                     .clickable {
                                         view.isHapticFeedbackEnabled = true
                                         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP, android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                        com.smartbluetoothsleeptracker.core.haptics.HapticManager.vibrateClick(context)
                                         viewModel.setPeriod(period)
                                     }
                                     .padding(vertical = 8.dp),
@@ -159,21 +164,10 @@ fun UsageScreen(
                             fontWeight = FontWeight.Bold, color = TextTertiary, letterSpacing = 1.sp)
                     }
                     items(state.deviceStats, key = { it.device.address }) { stat ->
-                        DeviceRow(stat = stat, onClick = { selectedDevice = stat })
+                        DeviceRow(stat = stat, onClick = { selectedDeviceAddress = stat.device.address })
                     }
                 }
 
-                // Sessions
-                if (state.sessions.isNotEmpty()) {
-                    item { Spacer(Modifier.height(4.dp)) }
-                    item {
-                        Text("SESSIONS", style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold, color = TextTertiary, letterSpacing = 1.sp)
-                    }
-                    items(state.sessions.take(20), key = { it.id }) { session ->
-                        SessionRow(session = session, onDelete = { viewModel.deleteSession(session.id) })
-                    }
-                }
 
                 // Enhanced empty state
                 if (state.sessions.isEmpty() && state.deviceStats.isEmpty()) {
@@ -432,17 +426,22 @@ private fun DeviceRow(stat: DeviceUsageStat, onClick: () -> Unit) {
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary
                 )
-                val isVerified = !stat.device.workingDisconnectMethod.isNullOrBlank()
+                val typeLabel = when (stat.device.deviceType) {
+                    DeviceType.EARBUDS -> "TWS Earbuds"
+                    DeviceType.NECKBAND -> "Neckband"
+                    DeviceType.WIRED_HEADPHONES -> "Wired"
+                    DeviceType.HOME_THEATRE -> "Speaker"
+                    DeviceType.SMARTWATCH -> "Watch"
+                    DeviceType.PC -> "PC"
+                    else -> "Bluetooth"
+                }
                 Text(
-                    text = if (isVerified) "Verified" else "Not yet verified",
+                    text = typeLabel,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isVerified) StatusGreen else TextTertiary,
+                    color = TextTertiary,
                     fontSize = 10.sp,
                     modifier = Modifier
-                        .background(
-                            if (isVerified) StatusGreen.copy(0.12f) else Surface2,
-                            RoundedCornerShape(6.dp)
-                        )
+                        .background(Surface2, RoundedCornerShape(6.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
@@ -452,77 +451,7 @@ private fun DeviceRow(stat: DeviceUsageStat, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun SessionRow(session: SessionEntity, onDelete: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth()
-            .background(Surface1, RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .background(
-                    if (session.disconnectConfirmed) StatusGreen.copy(0.12f) else Surface3,
-                    CircleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            val sessionIcon = if (session.deviceAddress == com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS) {
-                Icons.Rounded.Headphones
-            } else if (session.disconnectConfirmed) {
-                Icons.Rounded.CheckCircle
-            } else {
-                Icons.Rounded.Bluetooth
-            }
-            Icon(
-                imageVector = sessionIcon,
-                contentDescription = null,
-                tint = if (session.deviceAddress == com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS) AccentBlue else if (session.disconnectConfirmed) StatusGreen else TextSecondary,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                session.deviceName.ifEmpty { session.deviceAddress },
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                formatDate(session.startTime),
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        val playedMin = session.actualDurationMin ?: 0
-        Box(
-            Modifier
-                .background(Surface3, RoundedCornerShape(8.dp))
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) {
-            Text(
-                "Played: ${formatMinutes(playedMin)} · Set: ${formatMinutes(session.plannedDurationMin)}",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        IconButton(
-            onClick = onDelete,
-            modifier = Modifier.size(32.dp).background(Surface3.copy(0.5f), CircleShape)
-        ) {
-            Icon(Icons.Rounded.Close, "Delete", tint = TextTertiary, modifier = Modifier.size(14.dp))
-        }
-    }
-}
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -530,6 +459,7 @@ private fun DeviceBottomSheet(
     stat: DeviceUsageStat,
     onDismiss: () -> Unit,
     onToggleFavorite: (String) -> Unit,
+    onTestDisconnect: (String) -> Unit,
     onResetUsage: (String) -> Unit,
     onRemoveDevice: (String) -> Unit,
     onSetType: (String, DeviceType) -> Unit
@@ -566,7 +496,46 @@ private fun DeviceBottomSheet(
             Text(stat.device.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
             Spacer(Modifier.height(4.dp))
             Text("${stat.sessionCount} sessions · ${formatDuration(stat.totalMinutes.toLong() * 60_000L)}", color = TextSecondary)
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
+
+            // Favorite (Primary Target) Explanation Card
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (stat.device.isFavorite) AccentBlue.copy(0.1f) else Surface1
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Star,
+                        contentDescription = null,
+                        tint = if (stat.device.isFavorite) AccentBlue else TextTertiary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = if (stat.device.isFavorite) "Primary Sleep Target (Favorite)" else "Standard Device",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (stat.device.isFavorite) AccentBlue else TextPrimary
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "When multiple devices (e.g., earbuds & smartwatch) are connected, your Primary Sleep Target is prioritized to disconnect when the sleep timer ends.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
 
             // Device type selector
             Text("Device Type", style = MaterialTheme.typography.labelMedium, color = TextTertiary)
@@ -595,12 +564,25 @@ private fun DeviceBottomSheet(
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
             HorizontalDivider(color = SurfaceBorder)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
 
             // Actions
-            BottomSheetAction(Icons.Rounded.Star, if (stat.device.isFavorite) "Remove from favorites" else "Add to favorites", AccentBlue) {
+            BottomSheetAction(
+                icon = Icons.Rounded.PowerSettingsNew,
+                label = "Test Disconnect",
+                color = AccentBlue
+            ) {
+                onTestDisconnect(stat.device.address)
+            }
+            val localView = androidx.compose.ui.platform.LocalView.current
+            BottomSheetAction(
+                icon = if (stat.device.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                label = if (stat.device.isFavorite) "Remove from Primary Sleep Targets" else "Set as Primary Sleep Target (Favorite)",
+                color = if (stat.device.isFavorite) AccentBlue else TextPrimary
+            ) {
+                localView.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
                 onToggleFavorite(stat.device.address)
             }
             BottomSheetAction(Icons.Rounded.Refresh, "Reset usage data", StatusOrange) { showResetConfirm = true }

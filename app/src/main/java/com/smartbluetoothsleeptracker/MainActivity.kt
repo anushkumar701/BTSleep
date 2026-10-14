@@ -26,8 +26,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        com.smartbluetoothsleeptracker.core.firebase.FirebaseManager.initAndTrackDevice(this)
-
         val app = application as SleepBTApp
         val homeVm = ViewModelProvider(this)[HomeViewModel::class.java]
 
@@ -74,9 +72,8 @@ class MainActivity : ComponentActivity() {
                     com.smartbluetoothsleeptracker.ui.components.UpdateDialog(
                         updateInfo = updateInfo,
                         onUpdateClick = {
-                            scope.launch {
-                                updateManager.downloadAndInstallApk(updateInfo.downloadUrl)
-                            }
+                            updateManager.openReleaseInBrowser(updateInfo.downloadUrl)
+                            updateManager.dismissUpdate()
                         },
                         onDismissClick = {
                             updateManager.dismissUpdate()
@@ -92,5 +89,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val app = application as? SleepBTApp
+        app?.btMonitor?.refresh()
     }
 }

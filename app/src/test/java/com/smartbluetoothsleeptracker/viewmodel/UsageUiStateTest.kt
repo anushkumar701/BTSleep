@@ -11,7 +11,8 @@ class UsageUiStateTest {
     @Test
     fun testDefaultUsageUiState() {
         val state = UsageUiState()
-        assertEquals(UsagePeriod.WEEK, state.period)
+        assertEquals(UsagePeriod.TODAY, state.period)
+        assertEquals("Today's Hourly Usage", state.chartTitle)
         assertEquals(0, state.sessions.size)
         assertEquals(0, state.deviceStats.size)
         assertEquals(0, state.chartItems.size)

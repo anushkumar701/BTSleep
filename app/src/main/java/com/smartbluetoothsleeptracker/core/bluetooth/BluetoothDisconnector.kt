@@ -5,6 +5,7 @@ import android.bluetooth.*
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
@@ -91,16 +92,17 @@ class BluetoothDisconnector(
         cooldownSeconds: Int = 30,
         enableCooldown: Boolean = true
     ): DisconnectResult {
-        // Stop media first
-        stopAudioPlayback()
-
         val allTried = mutableListOf<Pair<String, Boolean>>()
         var anySuccess = false
         var lastMethod: String? = null
+        var systemDialogFired = false
 
         for (device in devices) {
-            val result = disconnectSingleDevice(device)
+            val result = disconnectSingleDevice(device, allowSystemDialog = !systemDialogFired)
             allTried.addAll(result.methodsTried)
+            if (result.methodsTried.any { it.first == "system_disable_dialog" }) {
+                systemDialogFired = true
+            }
             if (result.success) {
                 anySuccess = true
                 lastMethod = result.methodUsed
@@ -115,18 +117,23 @@ class BluetoothDisconnector(
             )
         }
 
-        // Only report success when at least one device was actually confirmed disconnected —
-        // previously this always returned true whenever the target list was non-empty,
-        // so the app claimed success even when every disconnect method failed.
         return DisconnectResult(anySuccess, lastMethod, allTried)
     }
 
     @SuppressLint("MissingPermission")
-    suspend fun disconnectSingleDevice(device: BluetoothDevice): DisconnectResult {
+    suspend fun disconnectSingleDevice(
+        device: BluetoothDevice,
+        allowSystemDialog: Boolean = true
+    ): DisconnectResult {
         val tried = mutableListOf<Pair<String, Boolean>>()
         val cached = db.deviceDao().getDevice(device.address)?.workingDisconnectMethod
 
-        val methods = buildMethodOrder(cached)
+        val allAvailableMethods = buildMethodOrder(device.address, cached)
+        val methods = if (!allowSystemDialog) {
+            allAvailableMethods.filter { it.id != "system_disable_dialog" }
+        } else {
+            allAvailableMethods
+        }
 
         var finalSuccess = false
         var winningMethodId: String? = null
@@ -134,9 +141,9 @@ class BluetoothDisconnector(
         for (method in methods) {
             var exceptionMsg: String? = null
             var executionResult = false
-            
+
             try {
-                withTimeout(5000) { method.execute(context, device) }
+                withTimeout(5000L) { method.execute(context, device) }
                 executionResult = true
             } catch (e: NoSuchMethodException) {
                 exceptionMsg = "NoSuchMethodException: ${e.message}"
@@ -147,6 +154,9 @@ class BluetoothDisconnector(
             } catch (e: SecurityException) {
                 exceptionMsg = "SecurityException: ${e.message}"
                 Log.w(TAG, "Method ${method.id} failed: $exceptionMsg")
+            } catch (e: TimeoutCancellationException) {
+                exceptionMsg = "Timeout after 5000ms"
+                Log.w(TAG, "Method ${method.id} timed out")
             } catch (e: Exception) {
                 exceptionMsg = "${e.javaClass.simpleName}: ${e.message}"
                 Log.w(TAG, "Method ${method.id} failed: $exceptionMsg")
@@ -154,11 +164,20 @@ class BluetoothDisconnector(
 
             var actuallyDisconnected = false
             if (method.id == "system_disable_dialog") {
-                // system_disable_dialog forces system dialog, wait for user. Assume success for logic flow.
-                actuallyDisconnected = true
+                // Wait briefly for user interaction, then verify honestly whether Bluetooth or device disconnected
+                delay(3000L)
+                actuallyDisconnected = !isDeviceActuallyConnected(device) || adapter?.isEnabled == false
+                if (!actuallyDisconnected) {
+                    exceptionMsg = "System dialog dismissed or Bluetooth remained enabled"
+                    Log.w(TAG, "Method ${method.id} verification failed: $exceptionMsg")
+                }
             } else if (executionResult) {
-                delay(2500L) // Wait for profile connections to drop (MIUI/OneUI can lag up to 2s)
-                actuallyDisconnected = !isDeviceActuallyConnected(device)
+                // Poll for disconnection up to 3 seconds to accommodate OEM stack latency
+                for (poll in 1..6) {
+                    delay(500L)
+                    actuallyDisconnected = !isDeviceActuallyConnected(device)
+                    if (actuallyDisconnected) break
+                }
                 if (!actuallyDisconnected) {
                     exceptionMsg = "Silent no-op (device still connected)"
                     Log.w(TAG, "Method ${method.id} failed: $exceptionMsg")
@@ -200,9 +219,13 @@ class BluetoothDisconnector(
         for (method in allMethods()) {
             var exceptionMsg: String? = null
             val ok = try {
-                withTimeout(5000) { method.execute(context, device) }
+                withTimeout(5000L) { method.execute(context, device) }
                 delay(1500L)
-                if (method.id == "system_disable_dialog") true else !isDeviceActuallyConnected(device)
+                if (method.id == "system_disable_dialog") {
+                    !isDeviceActuallyConnected(device) || adapter?.isEnabled == false
+                } else {
+                    !isDeviceActuallyConnected(device)
+                }
             } catch (e: Exception) {
                 exceptionMsg = "${e.javaClass.simpleName}: ${e.message}"
                 false
@@ -308,9 +331,17 @@ class BluetoothDisconnector(
     private fun allMethods(): List<DisconnectMethod> = listOf(
         DisconnectMethod("a2dp_reflection", "A2DP Reflection") { ctx, dev ->
             disconnectViaProfile(ctx, BluetoothProfile.A2DP, dev)
+            // Also attempt HFP and direct device disconnect so device completely drops link
+            runCatching { disconnectViaProfile(ctx, BluetoothProfile.HEADSET, dev) }
+            runCatching {
+                val m = dev.javaClass.getDeclaredMethod("disconnect")
+                m.isAccessible = true
+                m.invoke(dev)
+            }
         },
         DisconnectMethod("hfp_reflection", "HFP Reflection") { ctx, dev ->
             disconnectViaProfile(ctx, BluetoothProfile.HEADSET, dev)
+            runCatching { disconnectViaProfile(ctx, BluetoothProfile.A2DP, dev) }
         },
         DisconnectMethod("le_audio_reflection", "LE Audio Reflection") { ctx, dev ->
             if (Build.VERSION.SDK_INT >= 33) {
@@ -330,11 +361,18 @@ class BluetoothDisconnector(
         }
     )
 
-    private fun buildMethodOrder(cachedMethod: String?): List<DisconnectMethod> {
+    private suspend fun buildMethodOrder(deviceAddress: String, cachedMethod: String?): List<DisconnectMethod> {
         val all = allMethods()
-        if (cachedMethod == null) return all
-        val cached = all.find { it.id == cachedMethod } ?: return all
-        return listOf(cached) + all.filter { it.id != cachedMethod }
+        val recentAttempts = runCatching {
+            db.disconnectAttemptDao().getAttemptsForDeviceNow(deviceAddress).take(6)
+        }.getOrDefault(emptyList())
+
+        return MethodOrderResolver.resolveOrder(
+            allMethods = all,
+            getMethodId = { it.id },
+            recentAttempts = recentAttempts,
+            cachedMethodId = cachedMethod
+        )
     }
 
     // ── Disconnect Implementations ─────────────────────────────────────────
@@ -344,14 +382,25 @@ class BluetoothDisconnector(
         ctx: Context,
         profileType: Int,
         device: BluetoothDevice
-    ) = suspendCoroutine<Unit> { cont ->
+    ) = suspendCancellableCoroutine<Unit> { cont ->
         val ad = adapter
-        if (ad == null) { cont.resumeWithException(IllegalStateException("No BluetoothAdapter")); return@suspendCoroutine }
+        if (ad == null) {
+            if (cont.isActive) cont.resumeWithException(IllegalStateException("No BluetoothAdapter"))
+            return@suspendCancellableCoroutine
+        }
 
+        var activeProxy: BluetoothProfile? = null
         val resumed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        cont.invokeOnCancellation {
+            activeProxy?.let { proxy ->
+                runCatching { ad.closeProfileProxy(profileType, proxy) }
+            }
+        }
 
         val listener = object : BluetoothProfile.ServiceListener {
             override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                activeProxy = proxy
                 var exception: Exception? = null
                 try {
                     val method = proxy.javaClass.getDeclaredMethod("disconnect", BluetoothDevice::class.java)
@@ -360,10 +409,14 @@ class BluetoothDisconnector(
                 } catch (e: Exception) {
                     exception = e
                 }
-                
-                runCatching { ad.closeProfileProxy(profile, proxy) }
-                
-                if (resumed.compareAndSet(false, true)) {
+
+                scope.launch {
+                    delay(250L) // Give Binder IPC transaction time to dispatch
+                    runCatching { ad.closeProfileProxy(profile, proxy) }
+                }
+                activeProxy = null
+
+                if (resumed.compareAndSet(false, true) && cont.isActive) {
                     if (exception != null) {
                         cont.resumeWithException(exception)
                     } else {
@@ -373,28 +426,76 @@ class BluetoothDisconnector(
             }
 
             override fun onServiceDisconnected(profile: Int) {
-                if (resumed.compareAndSet(false, true)) cont.resumeWithException(IllegalStateException("Profile disconnected before execution"))
+                activeProxy = null
+                if (resumed.compareAndSet(false, true) && cont.isActive) {
+                    cont.resumeWithException(IllegalStateException("Profile disconnected before execution"))
+                }
             }
         }
 
-        val bound = ad.getProfileProxy(ctx, listener, profileType)
-        if (!bound && resumed.compareAndSet(false, true)) {
+        val bound = runCatching { ad.getProfileProxy(ctx, listener, profileType) }.getOrDefault(false)
+        if (!bound && resumed.compareAndSet(false, true) && cont.isActive) {
             cont.resumeWithException(IllegalStateException("Failed to bind profile proxy"))
         }
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun isDeviceActuallyConnected(device: BluetoothDevice): Boolean {
-        val reflectConnected = try {
-            val method = device.javaClass.getDeclaredMethod("isConnected")
-            method.isAccessible = true
-            method.invoke(device) as? Boolean ?: false
-        } catch (_: Exception) {
-            false
-        }
-        if (reflectConnected) return true
+    suspend fun isDeviceActuallyConnected(device: BluetoothDevice): Boolean {
+        val ad = adapter ?: return false
+        if (!ad.isEnabled) return false
 
-        return isDeviceConnectedViaProfiles(device)
+        // 1. Audio Manager check: find active Bluetooth audio outputs
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val audioDevices = audioManager?.getDevices(AudioManager.GET_DEVICES_OUTPUTS) ?: emptyArray()
+        val btAudioDevices = audioDevices.filter {
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+            (Build.VERSION.SDK_INT >= 31 && (
+                it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+            ))
+        }
+
+        // 2. Adapter profile connection states
+        val a2dpState = runCatching { ad.getProfileConnectionState(BluetoothProfile.A2DP) }.getOrDefault(BluetoothProfile.STATE_DISCONNECTED)
+        val hfpState = runCatching { ad.getProfileConnectionState(BluetoothProfile.HEADSET) }.getOrDefault(BluetoothProfile.STATE_DISCONNECTED)
+        val leState = if (Build.VERSION.SDK_INT >= 33) {
+            runCatching { ad.getProfileConnectionState(22) }.getOrDefault(BluetoothProfile.STATE_DISCONNECTED)
+        } else BluetoothProfile.STATE_DISCONNECTED
+
+        val anyAudioProfileActive = a2dpState == BluetoothProfile.STATE_CONNECTED ||
+                hfpState == BluetoothProfile.STATE_CONNECTED ||
+                leState == BluetoothProfile.STATE_CONNECTED
+
+        // If no Bluetooth audio routing and no audio profiles active, device is NOT connected
+        if (btAudioDevices.isEmpty() && !anyAudioProfileActive) {
+            return false
+        }
+
+        // 3. Check profile query specifically for THIS device
+        val isProfileConnected = withTimeoutOrNull(1500L) {
+            isDeviceConnectedViaProfiles(device)
+        }
+        if (isProfileConnected == true) return true
+
+        // 4. Check if active AudioManager output matches this device
+        val matchesAudioOutput = btAudioDevices.any { info ->
+            info.address.equals(device.address, ignoreCase = true) ||
+            (device.name != null && info.productName.toString().equals(device.name, ignoreCase = true))
+        }
+        if (matchesAudioOutput) return true
+
+        // 5. Only if an audio profile is globally active on the adapter, verify with reflection
+        if (anyAudioProfileActive) {
+            val reflectConnected = runCatching {
+                val method = device.javaClass.getDeclaredMethod("isConnected")
+                method.isAccessible = true
+                method.invoke(device) as? Boolean ?: false
+            }.getOrDefault(false)
+            if (reflectConnected) return true
+        }
+
+        return false
     }
 
     @SuppressLint("MissingPermission")
@@ -408,59 +509,50 @@ class BluetoothDisconnector(
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun isDeviceConnectedViaProfileType(profileType: Int, device: BluetoothDevice): Boolean = suspendCoroutine { cont ->
-        val ad = adapter
-        if (ad == null) { cont.resume(false); return@suspendCoroutine }
+    private suspend fun isDeviceConnectedViaProfileType(profileType: Int, device: BluetoothDevice): Boolean =
+        suspendCancellableCoroutine { cont ->
+            val ad = adapter
+            if (ad == null) {
+                if (cont.isActive) cont.resume(false)
+                return@suspendCancellableCoroutine
+            }
 
-        val resumed = java.util.concurrent.atomic.AtomicBoolean(false)
+            var activeProxy: BluetoothProfile? = null
+            val resumed = java.util.concurrent.atomic.AtomicBoolean(false)
 
-        val listener = object : BluetoothProfile.ServiceListener {
-            override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                val state = try {
-                    proxy.getConnectionState(device)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to get connection state for profile $profileType: ${e.message}")
-                    BluetoothProfile.STATE_DISCONNECTED
-                }
-                runCatching { ad.closeProfileProxy(profile, proxy) }
-                if (resumed.compareAndSet(false, true)) {
-                    cont.resume(state == BluetoothProfile.STATE_CONNECTED)
+            cont.invokeOnCancellation {
+                activeProxy?.let { proxy ->
+                    runCatching { ad.closeProfileProxy(profileType, proxy) }
                 }
             }
 
-            override fun onServiceDisconnected(profile: Int) {
-                if (resumed.compareAndSet(false, true)) cont.resume(false)
+            val listener = object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                    activeProxy = proxy
+                    val state = try {
+                        proxy.getConnectionState(device)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to get connection state for profile $profileType: ${e.message}")
+                        BluetoothProfile.STATE_DISCONNECTED
+                    }
+                    runCatching { ad.closeProfileProxy(profile, proxy) }
+                    activeProxy = null
+                    if (resumed.compareAndSet(false, true) && cont.isActive) {
+                        cont.resume(state == BluetoothProfile.STATE_CONNECTED)
+                    }
+                }
+
+                override fun onServiceDisconnected(profile: Int) {
+                    activeProxy = null
+                    if (resumed.compareAndSet(false, true) && cont.isActive) cont.resume(false)
+                }
+            }
+
+            val bound = runCatching { ad.getProfileProxy(context, listener, profileType) }.getOrDefault(false)
+            if (!bound && resumed.compareAndSet(false, true) && cont.isActive) {
+                cont.resume(false)
             }
         }
-
-        val bound = ad.getProfileProxy(context, listener, profileType)
-        if (!bound && resumed.compareAndSet(false, true)) {
-            cont.resume(false)
-        }
-    }
-
-    // ── Audio Playback Stop ────────────────────────────────────────────────
-
-    private fun stopAudioPlayback() {
-        runCatching {
-            audioManager?.let { am ->
-                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE))
-                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE))
-                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_STOP))
-                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_STOP))
-
-                val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .build()
-                    )
-                    .build()
-                am.requestAudioFocus(focusRequest)
-            }
-        }
-    }
 
     // ── Utility ────────────────────────────────────────────────────────────
 
@@ -470,24 +562,34 @@ class BluetoothDisconnector(
         val result = mutableListOf<BluetoothDevice>()
 
         runCatching {
-            val a2dpConn = try { ad.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED } catch (_: Exception) { false }
-            val hfpConn = try { ad.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED } catch (_: Exception) { false }
-            val leConn = try {
-                if (Build.VERSION.SDK_INT >= 33) ad.getProfileConnectionState(22) == BluetoothProfile.STATE_CONNECTED else false
-            } catch (_: Exception) { false }
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            val audioDevices = audioManager?.getDevices(AudioManager.GET_DEVICES_OUTPUTS) ?: emptyArray()
+            val audioDeviceAddresses = audioDevices.mapNotNull { it.address.takeIf { addr -> addr.isNotBlank() } }
+            val audioDeviceNames = audioDevices.map { it.productName.toString().trim() }.filter { it.isNotBlank() }
 
-            val anyAudioProfileConn = a2dpConn || hfpConn || leConn
+            val a2dpConn = try { ad.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothAdapter.STATE_CONNECTED } catch (_: Exception) { false }
+            val hfpConn = try { ad.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothAdapter.STATE_CONNECTED } catch (_: Exception) { false }
+            val anyAudioConn = a2dpConn || hfpConn
 
             ad.bondedDevices?.forEach { device ->
-                val isConn = try {
+                val devAddr = device.address
+                val devName = device.name ?: ""
+
+                val matchesAudioOutput = audioDeviceAddresses.contains(devAddr) ||
+                        (devName.isNotBlank() && audioDeviceNames.any { it.equals(devName, ignoreCase = true) })
+
+                val isReflectConnected = runCatching {
                     val method = device.javaClass.getDeclaredMethod("isConnected")
                     method.isAccessible = true
                     method.invoke(device) as? Boolean ?: false
-                } catch (_: Exception) {
-                    false
-                } || (anyAudioProfileConn && (device.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO))
+                }.getOrDefault(false)
 
-                if (isConn) result.add(device)
+                // Only consider connected if AudioManager has it OR reflection confirmed while an audio profile is actively connected
+                val isConn = matchesAudioOutput || (isReflectConnected && anyAudioConn && device.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO)
+
+                if (isConn && !result.any { it.address == devAddr }) {
+                    result.add(device)
+                }
             }
         }
         return result

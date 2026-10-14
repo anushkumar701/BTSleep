@@ -3,17 +3,13 @@ package com.smartbluetoothsleeptracker.core.update
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.util.Log
-import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.File
-import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -29,22 +25,39 @@ data class UpdateInfo(
 
 class UpdateManager(private val context: Context) {
 
+    companion object {
+        private const val TAG = "UpdateManager"
+        private const val PREFS_NAME = "update_prefs"
+        private const val KEY_LAST_CHECK_TS = "last_check_timestamp"
+        private const val CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L // 24 hours
+        private const val GITHUB_REPO_URL = "https://api.github.com/repos/anushkumar701/BTSleep/releases/latest"
+    }
+
     private val _updateState = MutableStateFlow(UpdateInfo())
     val updateState: StateFlow<UpdateInfo> = _updateState.asStateFlow()
 
-    private val githubRepoUrl = "https://api.github.com/repos/anushkumar701/BTSleep/releases/latest"
+    suspend fun checkForUpdates(force: Boolean = false) = withContext(Dispatchers.IO) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val lastCheck = prefs.getLong(KEY_LAST_CHECK_TS, 0L)
+        val now = System.currentTimeMillis()
 
-    suspend fun checkForUpdates() = withContext(Dispatchers.IO) {
+        if (!force && (now - lastCheck) < CHECK_INTERVAL_MS) {
+            Log.d(TAG, "Skipping update check — checked within the last 24h")
+            return@withContext
+        }
+
+        var connection: HttpURLConnection? = null
         try {
-            val url = URL(githubRepoUrl)
-            val connection = url.openConnection() as HttpURLConnection
+            val url = URL(GITHUB_REPO_URL)
+            connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
             connection.setRequestProperty("Accept", "application/vnd.github.v3+json")
             connection.setRequestProperty("User-Agent", "SleepBT-App")
 
             if (connection.responseCode == 200) {
+                prefs.edit().putLong(KEY_LAST_CHECK_TS, now).apply()
                 val jsonStr = connection.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(jsonStr)
 
@@ -52,141 +65,65 @@ class UpdateManager(private val context: Context) {
                 val notes = json.optString("body", "Bug fixes and performance improvements.").trim()
                 val htmlUrl = json.optString("html_url", "https://github.com/anushkumar701/BTSleep/releases")
 
-                // Find APK asset URL
-                var apkUrl = htmlUrl
-                val assets = json.optJSONArray("assets")
-                if (assets != null) {
-                    for (i in 0 until assets.length()) {
-                        val asset = assets.getJSONObject(i)
-                        val name = asset.optString("name", "")
-                        if (name.endsWith(".apk", ignoreCase = true)) {
-                            apkUrl = asset.optString("browser_download_url", htmlUrl)
-                            break
-                        }
-                    }
-                }
-
                 val currentVersion = getAppVersionName()
                 if (isNewerVersion(rawTag, currentVersion)) {
                     _updateState.value = UpdateInfo(
                         isAvailable = true,
                         latestVersion = rawTag,
                         releaseNotes = notes,
-                        downloadUrl = apkUrl
+                        downloadUrl = htmlUrl
                     )
+                    Log.i(TAG, "Update available: $rawTag (current: $currentVersion)")
                 } else {
                     _updateState.value = UpdateInfo(isAvailable = false)
+                    Log.d(TAG, "App is up to date: $currentVersion")
                 }
             } else {
-                Log.d("UpdateManager", "No release found or code: ${connection.responseCode}")
+                Log.d(TAG, "Update check response: ${connection.responseCode}")
             }
         } catch (e: Exception) {
-            Log.e("UpdateManager", "Update check failed: ${e.message}")
+            Log.w(TAG, "Update check failed: ${e.message}")
+        } finally {
+            connection?.disconnect()
         }
     }
 
-    suspend fun downloadAndInstallApk(apkUrl: String) = withContext(Dispatchers.IO) {
-        if (apkUrl.isBlank()) return@withContext
-
-        try {
-            _updateState.value = _updateState.value.copy(isDownloading = true, downloadProgress = 0f, error = null)
-
-            val url = URL(apkUrl)
-            val connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = 10000
-            connection.readTimeout = 15000
-            connection.connect()
-
-            val fileLength = connection.contentLength
-            val apkFile = File(context.cacheDir, "SleepBT_update.apk")
-            if (apkFile.exists()) apkFile.delete()
-
-            connection.inputStream.use { input ->
-                FileOutputStream(apkFile).use { output ->
-                    val data = ByteArray(4096)
-                    var total: Long = 0
-                    var count: Int
-                    while (input.read(data).also { count = it } != -1) {
-                        total += count
-                        output.write(data, 0, count)
-                        if (fileLength > 0) {
-                            val progress = (total.toFloat() / fileLength.toFloat())
-                            _updateState.value = _updateState.value.copy(downloadProgress = progress)
-                        }
-                    }
-                }
+    fun openReleaseInBrowser(url: String) {
+        val targetUrl = url.ifBlank { "https://github.com/anushkumar701/BTSleep/releases" }
+        runCatching {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-
-            _updateState.value = _updateState.value.copy(isDownloading = false, downloadProgress = 1.0f)
-            promptInstallApk(apkFile)
-
-        } catch (e: Exception) {
-            Log.e("UpdateManager", "Failed to download APK: ${e.message}")
-            _updateState.value = _updateState.value.copy(
-                isDownloading = false,
-                error = "Direct download failed. Opening browser release page..."
-            )
-            // Fallback: Open browser to download directly
-            openBrowserFallback(apkUrl)
-        }
-    }
-
-    fun promptInstallApk(apkFile: File) {
-        try {
-            val intent = Intent(Intent.ACTION_VIEW)
-            val apkUri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    apkFile
-                )
-            } else {
-                Uri.fromFile(apkFile)
-            }
-
-            intent.setDataAndType(apkUri, "application/vnd.android.package-archive")
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
             context.startActivity(intent)
-        } catch (e: Exception) {
-            Log.e("UpdateManager", "Install prompt failed: ${e.message}")
-            openBrowserFallback(_updateState.value.downloadUrl)
-        }
-    }
-
-    fun openBrowserFallback(urlStr: String) {
-        try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlStr))
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            Log.e("UpdateManager", "Failed to open browser: ${e.message}")
+        }.onFailure { e ->
+            Log.e(TAG, "Could not open browser for update URL: ${e.message}")
         }
     }
 
     fun dismissUpdate() {
-        _updateState.value = UpdateInfo(isAvailable = false)
+        _updateState.value = _updateState.value.copy(isAvailable = false)
     }
 
     private fun getAppVersionName(): String {
         return try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            pInfo.versionName ?: "1.0.0"
-        } catch (e: Exception) {
-            "1.0.0"
+            pInfo.versionName ?: com.smartbluetoothsleeptracker.BuildConfig.VERSION_NAME
+        } catch (_: Exception) {
+            com.smartbluetoothsleeptracker.BuildConfig.VERSION_NAME
         }
     }
 
-    private fun isNewerVersion(remote: String, current: String): Boolean {
-        if (remote.isBlank() || current.isBlank()) return false
-        val rParts = remote.split(".").mapNotNull { it.toIntOrNull() }
-        val cParts = current.split(".").mapNotNull { it.toIntOrNull() }
+    private fun isNewerVersion(remoteVer: String, currentVer: String): Boolean {
+        if (remoteVer.isBlank() || currentVer.isBlank()) return false
+        val remoteParts = remoteVer.split(".").mapNotNull { it.toIntOrNull() }
+        val currentParts = currentVer.split(".").mapNotNull { it.toIntOrNull() }
 
-        val maxLen = maxOf(rParts.size, cParts.size)
+        val maxLen = maxOf(remoteParts.size, currentParts.size)
         for (i in 0 until maxLen) {
-            val rVal = rParts.getOrElse(i) { 0 }
-            val cVal = cParts.getOrElse(i) { 0 }
-            if (rVal > cVal) return true
-            if (rVal < cVal) return false
+            val r = remoteParts.getOrElse(i) { 0 }
+            val c = currentParts.getOrElse(i) { 0 }
+            if (r > c) return true
+            if (r < c) return false
         }
         return false
     }

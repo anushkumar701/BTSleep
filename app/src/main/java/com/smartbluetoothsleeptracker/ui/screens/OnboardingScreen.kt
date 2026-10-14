@@ -119,12 +119,20 @@ fun OnboardingScreen(
                 OnboardingStep.BATTERY -> BatteryStep(
                     onRequest = {
                         try {
-                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                data = Uri.parse("package:${context.packageName}")
+                            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
                             context.startActivity(intent)
                         } catch (e: Exception) {
-                            android.widget.Toast.makeText(context, "Battery settings not found on this device", android.widget.Toast.LENGTH_SHORT).show()
+                            try {
+                                val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(fallback)
+                            } catch (_: Exception) {
+                                android.widget.Toast.makeText(context, "Battery settings not found on this device", android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         }
                         step = OnboardingStep.DONE
                     },
