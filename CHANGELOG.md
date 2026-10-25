@@ -24,9 +24,15 @@ Comprehensive bug fixes for accidental timer auto-extend, volume key detection d
 - **5-Second Grace Disconnect**: In `TimerService`, reduced mid-session disconnect detection from 60s to 5s. If all target devices or connected audio devices disconnect (or Bluetooth is turned off), the service promptly finishes the session, updates UI state, and stops cleanly without lingering or auto-extending.
 - **Auto-Target Assignment**: Starting a timer without picking a specific device now auto-binds to currently connected audio devices so disconnect detection always functions.
 
-### 🔋 Case Battery Status Resolution
-- **Multi-Source Vendor Telemetry**: Added decoding for Samsung Buds, Google Fast Pair, and Apple HFP (`+IPHONEACCEV`) dock status, caching confirmed case battery levels in SharedPreferences.
-- **Clean Status Display**: When case battery level is known, displays exact percentage (e.g. `85%`). If the case hardware does not broadcast a separate BLE transmitter when closed, displays a clean `Good` / `Ready` status with green battery indicator rather than a broken `"--"`.
+### 🔋 Grounded Earbuds Case Battery Support
+- **Hardware-Grounded Providers**: Replaced speculative metadata reflection and synthetic "Good" fallbacks with verified hardware providers (`AppleCaseBatteryProvider` via BLE proximity pairing adverts for AirPods/Beats on Android 12+, and `GalaxyBudsCaseBatteryProvider` via RFCOMM SPP for Samsung Galaxy Buds).
+- **Honest Telemetry Reporting**: Never synthesizes or fabricates battery percentages. Unsupported earbuds (boAt, OnePlus, Realme, Xiaomi, Noise, Pixel Buds) truthfully display `--` with clear explanation.
+- **Dynamic Charging & Staleness Status**: Earbud battery card displays real-time charging bolt indicator when case is charging, and notes "seen Nm ago" when case telemetry is older than 5 minutes.
+
+### ⏱️ Accurate Usage Timing & Synchronization
+- **Eliminated Live Double-Counting**: Fixed `TimerService` to properly record background listening duration before starting a timer and reset connection timestamps, preventing active Bluetooth connection time from double-counting with completed sessions.
+- **Synchronized Chart & Device Statistics**: Aligned Week and Month chart aggregation logic with device stats so bar totals mathematically match device stat summaries.
+- **Sub-30s Session Purge**: Filtered out ghost sessions under 30 seconds from incrementing daily session counts or appearing in usage history.
 
 ### ⚡ Instantaneous App Refresh
 - **Persistent Profile Proxies**: Cached `BluetoothProfile` proxies (`A2DP` and `HEADSET`) on startup in `BluetoothMonitor`, allowing profile device queries to complete synchronously in < 1ms instead of blocking for 1.5s on every refresh.

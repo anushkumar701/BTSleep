@@ -58,6 +58,15 @@ Falling asleep while listening to audiobooks, podcasts, white noise, or music is
 - **Connected Duration Breakdown**: Visual chart and streak tracker for daily Bluetooth audio device connected time.
 - **Local SQLite History**: Stores past sleep sessions and weekly trends in a private Room database on your device.
 
+### 🔋 Earbuds Case Battery Support
+Android does not provide a standard public API for earbuds charging cases to third-party non-system apps. SleepBT provides verified hardware providers for supported earbuds, and honestly displays `--` when a model does not expose its case telemetry:
+
+| Earbud Family | Case Battery Support | Requirements & Details |
+|---|---|---|
+| **Apple AirPods & Beats** | **Supported** | Android 12+ with `BLUETOOTH_SCAN` ("Nearby devices") permission. Listens for BLE proximity adverts (0x004C) in short windows while Home screen is visible. |
+| **Samsung Galaxy Buds** | **Supported** | Uses RFCOMM SPP protocol (`2e73a4ad-332d-41fc-90e2-16bef06523f2`) with `BLUETOOTH_CONNECT`. Polled at most once per minute while Home screen is visible. |
+| **Other Earbuds** (OnePlus, Realme, Oppo, Xiaomi, boAt, Noise, Pixel Buds, etc.) | **Main Level Only** | Case battery is not exposed by hardware/firmware to third-party apps. UI displays `--` with *"Case battery isn't available for this earbud"*. |
+
 ---
 
 ## 🔄 Sleep Expiry Sequence

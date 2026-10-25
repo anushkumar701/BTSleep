@@ -1,5 +1,10 @@
 package com.smartbluetoothsleeptracker.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -12,6 +17,12 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -1694,6 +1705,45 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
 
     val battery = activeDevice.battery ?: com.smartbluetoothsleeptracker.core.bluetooth.BatteryInfo()
     val isEarbuds = activeDevice.type == com.smartbluetoothsleeptracker.data.db.DeviceType.EARBUDS
+    val context = LocalContext.current
+    val app = context.applicationContext as? com.smartbluetoothsleeptracker.SleepBTApp
+
+    var hasScanPermission by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+            } else true
+        )
+    }
+
+    val coroutineScope = rememberCoroutineScope()
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasScanPermission = isGranted
+        if (isGranted) {
+            val dev = activeDevice.device
+            if (dev != null) {
+                coroutineScope.launch {
+                    app?.btMonitor?.queryCaseBattery(dev, activeDevice.name)
+                }
+            }
+        }
+    }
+
+    val isAppleDevice = activeDevice.name.contains("AirPods", ignoreCase = true) ||
+            activeDevice.name.contains("Beats", ignoreCase = true)
+
+    // Poll case battery while Home screen is visible and an earbuds device is connected
+    LaunchedEffect(activeDevice.address, hasScanPermission) {
+        val dev = activeDevice.device ?: return@LaunchedEffect
+        if (isEarbuds) {
+            while (isActive) {
+                app?.btMonitor?.queryCaseBattery(dev, activeDevice.name)
+                delay(60_000L)
+            }
+        }
+    }
 
     if (isEarbuds) {
         // ── Earbuds: Left, Right, Case ──────────────────────────────
@@ -1767,7 +1817,18 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
                         battery.leftLevel in 0..100 -> battery.leftLevel
                         else -> -1
                     }
+                    val caseBat = battery.caseBattery
                     val caseLvl = if (battery.caseLevel in 0..100) battery.caseLevel else -1
+                    val isCaseKnown = caseLvl in 0..100
+                    val now = System.currentTimeMillis()
+                    val isStale = isCaseKnown && caseBat != null && (now - caseBat.seenAtMillis > 5 * 60 * 1000L)
+                    val caseSubtext = when {
+                        isStale && caseBat != null -> {
+                            val mins = ((now - caseBat.seenAtMillis) / 60_000L).coerceAtLeast(1L)
+                            "seen ${mins}m ago"
+                        }
+                        else -> null
+                    }
 
                     EarbudBatteryItem(
                         label = "Left",
@@ -1797,8 +1858,48 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
                         label = "Case",
                         level = caseLvl,
                         icon = Icons.Rounded.Inbox,
-                        isCase = true
+                        isCharging = caseBat?.charging,
+                        subtext = caseSubtext
                     )
+                }
+
+                // Case support & permission explanation
+                val caseLvlCheck = if (battery.caseLevel in 0..100) battery.caseLevel else -1
+                if (caseLvlCheck !in 0..100) {
+                    val needPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isAppleDevice && !hasScanPermission
+                    if (needPermission) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                        permissionLauncher.launch(Manifest.permission.BLUETOOTH_SCAN)
+                                    }
+                                }
+                                .padding(vertical = 2.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Allow Nearby devices to see the case battery",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 11.sp,
+                                color = AccentBlue,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else if (battery.caseSupport is com.smartbluetoothsleeptracker.core.bluetooth.case.CaseSupport.Unsupported) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Case battery isn't available for this earbud",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 11.sp,
+                            color = TextTertiary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
         }
@@ -1901,7 +2002,8 @@ private fun EarbudBatteryItem(
     label: String,
     level: Int,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    isCase: Boolean = false
+    isCharging: Boolean? = null,
+    subtext: String? = null
 ) {
     val isKnown = level in 0..100
     val color = when {
@@ -1929,12 +2031,32 @@ private fun EarbudBatteryItem(
                 fontSize = 10.sp,
                 color = TextTertiary
             )
-            Text(
-                text = if (isKnown) "$level%" else "--",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = color
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (isKnown) "$level%" else "--",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = color
+                )
+                if (isCharging == true) {
+                    Spacer(Modifier.width(2.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.Bolt,
+                        contentDescription = "Charging",
+                        tint = StatusGreen,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+            if (!subtext.isNullOrBlank()) {
+                Text(
+                    text = subtext,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp,
+                    color = TextTertiary,
+                    lineHeight = 11.sp
+                )
+            }
         }
     }
 }

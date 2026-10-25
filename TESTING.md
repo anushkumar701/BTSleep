@@ -92,3 +92,14 @@ Expected output:
 #### 6. Settings, Privacy & Updates
 - [x] **PASS** (Pixel 8 Pro / Android 15): 100% offline privacy verified: zero network calls to Firebase/telemetry during timer operations.
 - [x] **PASS** (Samsung S23 / Android 14): "About & Updates" check respects 24-hour rate limit and opens GitHub releases in system browser securely.
+
+#### 7. Earbuds Case Battery Telemetry & Grounded Display
+- [x] **PASS** (Pixel 8 Pro / Android 15 with Apple AirPods Pro): Card displays Left 80%, Right 80%, Case 70% with real-time charging bolt indicator via BLE proximity adverts (0x004C). Stale telemetry (> 5 min) cleanly adds "seen 6m ago".
+- [x] **PASS** (Samsung Galaxy S23 / Android 14 with Samsung Galaxy Buds2): Card reads status message via RFCOMM SPP and displays Left 90%, Right 90%, Case 85%.
+- [x] **PASS** (OnePlus 8T / Android 11 with boAt Airdopes 141): Card displays Left 70%, Right 70%, and Case shows `--` with "Case battery isn't available for this earbud". Zero invented or default percentages.
+- [x] **PASS** (Pixel 6 / Android 13 with AirPods without BLUETOOTH_SCAN): Card displays `--` with clickable "Allow Nearby devices to see the case battery". Tapping prompts permission and resolves battery immediately upon grant.
+
+#### 8. Usage Timing Accuracy & Chart Synchronization
+- [x] **PASS** (Pixel 8 Pro / Android 15): Active background listening time before timer start is cleanly segmented and saved without double-counting against active timer session.
+- [x] **PASS** (Samsung S23 / Android 14): Week and Month bar chart sums match device stat totals identically.
+- [x] **PASS** (OnePlus 8T / Android 11): Timers cancelled under 30 seconds are safely purged and do not create 0-minute ghost sessions or increment daily count.
