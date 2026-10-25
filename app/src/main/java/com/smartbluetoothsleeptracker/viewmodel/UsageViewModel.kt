@@ -93,19 +93,33 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
             .sortedByDescending { it.startTime }
             .toMutableList()
 
-        // Check active ongoing Bluetooth connections to include live listening duration
+        // Check active ongoing Bluetooth connections or running timer to include live duration
         val connectedDevices = app.btMonitor.connectedDevices.value
         val activeAddrs = connectedDevices.map { it.address }
         val now = System.currentTimeMillis()
 
+        // Check if a timer session is actively running
+        val activeSession = sessions.find { it.endTime == null }
+        val activeTimerAddr = activeSession?.deviceAddress
+
         val liveMinutesMap = mutableMapOf<String, Int>()
         activeAddrs.forEach { addr ->
-            val startTime = BluetoothReceiver.getActiveConnectTime(app, addr)
-            if (startTime > 0L && now > startTime) {
-                val durationMs = now - startTime
-                val liveMin = com.smartbluetoothsleeptracker.service.TimerCalculations.calculateDurationMinutes(durationMs)
+            if (activeSession != null && addr == activeTimerAddr) {
+                // Live duration of the running timer
+                val elapsedMs = (now - activeSession.startTime).coerceAtLeast(0L)
+                val liveMin = com.smartbluetoothsleeptracker.service.TimerCalculations.calculateDurationMinutes(elapsedMs)
                 if (liveMin > 0) {
                     liveMinutesMap[addr] = liveMin
+                }
+            } else if (activeSession == null || addr != activeTimerAddr) {
+                // Background connection time since last recorded event
+                val startTime = BluetoothReceiver.getActiveConnectTime(app, addr)
+                if (startTime > 0L && now > startTime) {
+                    val durationMs = now - startTime
+                    val liveMin = com.smartbluetoothsleeptracker.service.TimerCalculations.calculateDurationMinutes(durationMs)
+                    if (liveMin > 0) {
+                        liveMinutesMap[addr] = liveMin
+                    }
                 }
             }
         }
@@ -115,19 +129,23 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val deviceAddrs = (sessions.map { it.deviceAddress } + dailyUsages.map { it.deviceAddress } + activeAddrs).distinct()
         val stats = deviceAddrs.mapNotNull { addr ->
             val dev = app.db.deviceDao().getDevice(addr) ?: return@mapNotNull null
-            val devSessions = sessions.filter { it.deviceAddress == addr }
-            val sessionMins = devSessions.sumOf { if (it.endTime == null) 0 else (it.actualDurationMin ?: 0) }
+            val devSessions = sessions.filter { it.deviceAddress == addr && it.endTime != null && (it.actualDurationMin ?: 0) > 0 }
+            val sessionMins = devSessions.sumOf { it.actualDurationMin ?: 0 }
             val dailyMins = dailyUsages.filter { it.deviceAddress == addr }.sumOf { it.totalMinutes }
             val baseMins = maxOf(sessionMins, dailyMins)
             val liveMins = liveMinutesMap[addr] ?: 0
             val totalMins = baseMins + liveMins
 
+            val completedCount = devSessions.size
             val dailyCount = dailyUsages.filter { it.deviceAddress == addr }.sumOf { it.sessionCount }
-            val completedCount = devSessions.count { it.endTime != null && (it.actualDurationMin ?: 0) > 0 }
-            val hasActiveNoRecentSession = liveMins > 0 && devSessions.none { it.endTime != null && (now - it.endTime) < 60_000 }
-            val count = maxOf(completedCount, dailyCount) + (if (hasActiveNoRecentSession) 1 else 0)
+            val hasActiveLive = liveMins > 0
+            val count = maxOf(completedCount, dailyCount) + (if (hasActiveLive) 1 else 0)
 
-            DeviceUsageStat(dev, totalMins, count)
+            if (totalMins > 0 || count > 0) {
+                DeviceUsageStat(dev, totalMins, count)
+            } else {
+                null
+            }
         }.sortedByDescending { it.totalMinutes }
 
         // ── Unified Chart Bar Items (12-Hour Format & Accurate Accounting) ──
@@ -160,15 +178,18 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                     val d = from.plusDays(offset.toLong())
                     val dStr = d.format(fmt)
                     val label = if (d == today) "Today" else d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
-                    val sessMins = sessions.filter { it.date == dStr }.sumOf {
-                        if (it.endTime == null) 0 else (it.actualDurationMin ?: 0)
+                    
+                    var dayMins = deviceAddrs.sumOf { addr ->
+                        val devSess = sessions.filter { it.deviceAddress == addr && it.date == dStr && it.endTime != null }
+                        val sMins = devSess.sumOf { it.actualDurationMin ?: 0 }
+                        val dMins = dailyUsages.filter { it.deviceAddress == addr && it.date == dStr }.sumOf { it.totalMinutes }
+                        maxOf(sMins, dMins)
                     }
-                    val dailyMins = dailyUsages.filter { it.date == dStr }.sumOf { it.totalMinutes }
-                    var dayMins = maxOf(sessMins, dailyMins)
-                    if (d == today && totalLiveMinutes > 0) {
+                    val isToday = (d == today)
+                    if (isToday && totalLiveMinutes > 0) {
                         dayMins += totalLiveMinutes
                     }
-                    ChartBarItem(label, dayMins, d == today)
+                    ChartBarItem(label, dayMins, isToday)
                 }
             }
             UsagePeriod.MONTH -> {
@@ -176,23 +197,23 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                     val wStart = from.plusDays((w * 7).toLong())
                     val wEnd = if (w == 3) today else wStart.plusDays(6)
                     val label = "W${w + 1}"
-                    val sessMins = sessions.filter {
-                        try {
-                            val d = LocalDate.parse(it.date, fmt)
-                            !d.isBefore(wStart) && !d.isAfter(wEnd)
-                        } catch (e: Exception) {
-                            false
+                    
+                    var weekMins = deviceAddrs.sumOf { addr ->
+                        val devSess = sessions.filter { s ->
+                            s.deviceAddress == addr && s.endTime != null && try {
+                                val d = LocalDate.parse(s.date, fmt)
+                                !d.isBefore(wStart) && !d.isAfter(wEnd)
+                            } catch (_: Exception) { false }
                         }
-                    }.sumOf { if (it.endTime == null) 0 else (it.actualDurationMin ?: 0) }
-                    val dailyMins = dailyUsages.filter {
-                        try {
-                            val d = LocalDate.parse(it.date, fmt)
-                            !d.isBefore(wStart) && !d.isAfter(wEnd)
-                        } catch (e: Exception) {
-                            false
-                        }
-                    }.sumOf { it.totalMinutes }
-                    var weekMins = maxOf(sessMins, dailyMins)
+                        val sMins = devSess.sumOf { it.actualDurationMin ?: 0 }
+                        val dMins = dailyUsages.filter { u ->
+                            u.deviceAddress == addr && try {
+                                val d = LocalDate.parse(u.date, fmt)
+                                !d.isBefore(wStart) && !d.isAfter(wEnd)
+                            } catch (_: Exception) { false }
+                        }.sumOf { it.totalMinutes }
+                        maxOf(sMins, dMins)
+                    }
                     val isCurrent = !today.isBefore(wStart) && !today.isAfter(wEnd)
                     if (isCurrent && totalLiveMinutes > 0) {
                         weekMins += totalLiveMinutes

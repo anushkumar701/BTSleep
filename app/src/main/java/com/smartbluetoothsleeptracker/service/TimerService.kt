@@ -304,6 +304,35 @@ class TimerService : Service() {
             app.prefs.setTimerTotalPaused(0L)
             app.prefs.setTimerPauseStart(0L)
 
+            // Check if any target device had an active background connection prior to timer start,
+            // log that prior session so it is accurately recorded without overlapping with the timer
+            for (addr in targetAddresses) {
+                val connectTime = com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.getActiveConnectTime(app, addr)
+                if (connectTime > 0L && sessionStartTime > connectTime) {
+                    val priorMs = sessionStartTime - connectTime
+                    val priorMin = TimerCalculations.calculateDurationMinutes(priorMs)
+                    if (priorMin >= 1) {
+                        val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                        val dev = app.db.deviceDao().getDevice(addr)
+                        app.db.sessionDao().insert(
+                            SessionEntity(
+                                deviceAddress = addr,
+                                deviceName = dev?.name ?: addr,
+                                startTime = connectTime,
+                                endTime = sessionStartTime,
+                                plannedDurationMin = priorMin,
+                                actualDurationMin = priorMin,
+                                disconnectConfirmed = false,
+                                date = today
+                            )
+                        )
+                        app.db.dailyUsageDao().recordUsage(today, addr, priorMin)
+                    }
+                }
+                // Set connect time to sessionStartTime so future background time does not double-count
+                com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(app, addr, sessionStartTime)
+            }
+
             // Create initial session record
             val session = SessionEntity(
                 deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
@@ -625,7 +654,7 @@ class TimerService : Service() {
                 val now = System.currentTimeMillis()
                 val startTime = if (sessionStartTime > 0L) sessionStartTime else (endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L)
                 val totalActiveMs = TimerCalculations.calculateActiveDurationMs(startTime, now, totalPausedMs)
-                val actualMin = TimerCalculations.calculateDurationMinutes(totalActiveMs)
+                val actualMin = TimerCalculations.calculateDurationMinutes(totalActiveMs).coerceAtLeast(plannedMinutes + extendedMinutes)
 
                 if (sessionId == 0L) {
                     sessionId = settings.activeSessionId
@@ -650,7 +679,15 @@ class TimerService : Service() {
                 app.db.sessionDao().pruneOldSessions(500)
 
                 for (addr in targetAddresses) {
-                    app.db.dailyUsageDao().recordUsage(today, addr, actualMin)
+                    if (actualMin > 0) {
+                        app.db.dailyUsageDao().recordUsage(today, addr, actualMin)
+                    }
+                    val stillConn = app.btMonitor.connectedDevices.value.any { it.address == addr }
+                    if (stillConn && !disconnectSuccess) {
+                        com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(app, addr, now)
+                    } else {
+                        com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.clearActiveConnectTime(app, addr)
+                    }
                 }
 
                 // ── HAPTICS & OUTCOME NOTIFICATION ──────────────────────────
@@ -712,21 +749,37 @@ class TimerService : Service() {
                 val startTime = if (sessionStartTime > 0L) sessionStartTime else (endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L)
                 val totalActiveMs = TimerCalculations.calculateActiveDurationMs(startTime, now, totalPausedMs)
                 val actualMin = TimerCalculations.calculateDurationMinutes(totalActiveMs)
-                app.db.sessionDao().upsert(
-                    SessionEntity(
-                        id = sessionId,
-                        deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
-                        deviceName = getDeviceName(targetAddresses.firstOrNull()),
-                        startTime = startTime,
-                        endTime = now,
-                        plannedDurationMin = plannedMinutes,
-                        actualDurationMin = actualMin,
-                        audioStopped = false,
-                        disconnectConfirmed = false,
-                        extendedMinutes = extendedMinutes,
-                        date = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                if (actualMin <= 0) {
+                    app.db.sessionDao().deleteById(sessionId)
+                } else {
+                    val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    app.db.sessionDao().upsert(
+                        SessionEntity(
+                            id = sessionId,
+                            deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
+                            deviceName = getDeviceName(targetAddresses.firstOrNull()),
+                            startTime = startTime,
+                            endTime = now,
+                            plannedDurationMin = plannedMinutes,
+                            actualDurationMin = actualMin,
+                            audioStopped = false,
+                            disconnectConfirmed = false,
+                            extendedMinutes = extendedMinutes,
+                            date = today
+                        )
                     )
-                )
+                    for (addr in targetAddresses) {
+                        app.db.dailyUsageDao().recordUsage(today, addr, actualMin)
+                    }
+                }
+                for (addr in targetAddresses) {
+                    val stillConn = app.btMonitor.connectedDevices.value.any { it.address == addr }
+                    if (stillConn) {
+                        com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(app, addr, now)
+                    } else {
+                        com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.clearActiveConnectTime(app, addr)
+                    }
+                }
             }
             app.prefs.clearTimer()
         }
@@ -768,24 +821,31 @@ class TimerService : Service() {
                 val startTime = if (sessionStartTime > 0L) sessionStartTime else (endTimeMillis - (plannedMinutes + extendedMinutes) * 60_000L)
                 val totalActiveMs = TimerCalculations.calculateActiveDurationMs(startTime, now, totalPausedMs)
                 val actualMin = TimerCalculations.calculateDurationMinutes(totalActiveMs)
-                val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-                app.db.sessionDao().upsert(
-                    SessionEntity(
-                        id = sessionId,
-                        deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
-                        deviceName = getDeviceName(targetAddresses.firstOrNull()),
-                        startTime = startTime,
-                        endTime = now,
-                        plannedDurationMin = plannedMinutes,
-                        actualDurationMin = actualMin,
-                        audioStopped = false,
-                        disconnectConfirmed = true,
-                        extendedMinutes = extendedMinutes,
-                        date = today
+                if (actualMin <= 0) {
+                    app.db.sessionDao().deleteById(sessionId)
+                } else {
+                    val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    app.db.sessionDao().upsert(
+                        SessionEntity(
+                            id = sessionId,
+                            deviceAddress = targetAddresses.firstOrNull() ?: "unknown",
+                            deviceName = getDeviceName(targetAddresses.firstOrNull()),
+                            startTime = startTime,
+                            endTime = now,
+                            plannedDurationMin = plannedMinutes,
+                            actualDurationMin = actualMin,
+                            audioStopped = false,
+                            disconnectConfirmed = true,
+                            extendedMinutes = extendedMinutes,
+                            date = today
+                        )
                     )
-                )
+                    for (addr in targetAddresses) {
+                        app.db.dailyUsageDao().recordUsage(today, addr, actualMin)
+                    }
+                }
                 for (addr in targetAddresses) {
-                    app.db.dailyUsageDao().recordUsage(today, addr, actualMin)
+                    com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.clearActiveConnectTime(app, addr)
                 }
             }
             app.prefs.clearTimer()

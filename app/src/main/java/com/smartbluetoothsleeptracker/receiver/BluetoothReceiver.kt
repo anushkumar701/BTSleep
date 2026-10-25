@@ -135,10 +135,10 @@ class BluetoothReceiver : BroadcastReceiver() {
                         val pendingResult = goAsync()
                         CoroutineScope(Dispatchers.IO).launch {
                             try {
-                                // Skip if TimerService created or updated a session for this device recently (last 5 minutes)
-                                val recentSession = app.db.sessionDao().getRecentSessionForDevice(address, now - 300_000L)
-                                if (recentSession != null) {
-                                    Log.i(TAG, "Skipping background session insertion — already recorded by TimerService")
+                                // Skip if TimerService is actively running for this device
+                                val activeSession = app.db.sessionDao().getRecentSessionForDevice(address, now - 60_000L)
+                                if (activeSession != null && activeSession.endTime == null) {
+                                    Log.i(TAG, "Skipping background session insertion — timer is actively running")
                                     return@launch
                                 }
 
@@ -156,17 +156,7 @@ class BluetoothReceiver : BroadcastReceiver() {
                                 )
                                 app.db.sessionDao().pruneOldSessions(500)
 
-                                val existingUsage = app.db.dailyUsageDao().getForDate(today)
-                                    .find { it.deviceAddress == address }
-
-                                app.db.dailyUsageDao().upsert(
-                                    DailyUsageEntity(
-                                        date = today,
-                                        deviceAddress = address,
-                                        totalMinutes = (existingUsage?.totalMinutes ?: 0) + minutes,
-                                        sessionCount = (existingUsage?.sessionCount ?: 0) + 1
-                                    )
-                                )
+                                app.db.dailyUsageDao().recordUsage(today, address, minutes)
                                 Log.i(TAG, "Saved background session: $minutes min for ${device.name ?: address}")
                             } catch (e: Exception) {
                                 Log.e(TAG, "Error recording usage on disconnect: ${e.message}")
