@@ -2,6 +2,22 @@
 
 All notable changes to **SleepBT** are documented in this file.
 
+## [1.0.2] - 2026-10-25
+
+### Summary
+Version release 1.0.2 featuring a clean adaptive earbud battery display (removing the Case column and disclaimers whenever case status cannot be fetched), and a comprehensive 6-step interactive in-app tutorial explaining Volume Fade, Reconnect Blocker, Usage, Hearing Health, and Settings.
+
+### 🔋 Clean Adaptive Battery Display
+- **Case Column Removed When Unavailable**: In `HomeScreen.kt`, if case battery telemetry is unsupported or unavailable on the connected earbuds (`caseLevel !in 0..100`), the Case column and dividers are cleanly omitted. The card renders Left and Right cleanly without dead `--` placeholders or disclaimers. Case is only rendered when telemetry is verified.
+
+### 📚 Comprehensive 6-Step In-App Tutorial
+- **Step 1 • Sleep Timer & Presets**: How to set duration with the smooth rotary dial and quick preset pills (15m, 30m, 45m, 60m).
+- **Step 2 • Volume Fade**: Clearly explains why music fades smoothly over 10–30s to prevent sudden awakenings, plus the pro tip: pressing any physical volume button during fade adds +5m.
+- **Step 3 • Reconnect Blocker**: Dedicated step explaining how SleepBT blocks aggressive earbuds from immediately reconnecting, beeping, and waking the user up.
+- **Step 4 • Usage & Primary Sleep Target**: Highlights daily/weekly session stats and how to tap the Star ★ on connected earbuds to designate the primary sleep device.
+- **Step 5 • Hearing Health & Ear Rest**: Explains the WHO-standard daily sound exposure gauge, ear rest score, and fatigue risk band (Low, Moderate, High).
+- **Step 6 • Settings & Controls**: Customizing auto-extend minutes, alert lead times, dark/light themes, and optional Shizuku controls.
+
 ## [1.0.5] - 2026-10-25
 
 ### Summary

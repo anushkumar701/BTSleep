@@ -45,7 +45,7 @@ data class InteractiveStage(
 @Composable
 fun InteractiveTutorialBanner(
     step: Int,
-    totalSteps: Int = 4,
+    totalSteps: Int = 6,
     userInteractedWithDial: Boolean,
     userInteractedWithFade: Boolean,
     selectedMinutes: Long,
@@ -58,43 +58,63 @@ fun InteractiveTutorialBanner(
         listOf(
             InteractiveStage(
                 step = 1,
-                totalSteps = 4,
-                badge = "STEP 1 • SET SLEEP TIMER",
-                title = "Set Your Duration",
-                prompt = "👉 Try it now: Drag the dial or tap any preset pill (15m, 30m, 45m, 60m) below!",
-                completedPrompt = "✓ Great job! You set the timer to ${selectedMinutes}m. Turn the dial anytime from 1 to 120m.",
+                totalSteps = 6,
+                badge = "STEP 1 OF 6 • SLEEP TIMER",
+                title = "Set Duration with Rotary Dial",
+                prompt = "👉 Rotate the smooth dial or tap any quick preset (15m, 30m, 45m, 60m) below to choose when audio stops.",
+                completedPrompt = "✓ Great job! Set to ${selectedMinutes}m. You can set anywhere from 1 to 120 minutes.",
                 icon = Icons.Rounded.Schedule,
                 accentColor = AccentBlue
             ),
             InteractiveStage(
                 step = 2,
-                totalSteps = 4,
-                badge = "STEP 2 • SLEEP PROTECTION",
-                title = "Volume Fade & Reconnect Blocker",
-                prompt = "🎵 1. Gentle Fade Out:\nInstead of cutting music abruptly (which jolts your brain awake), volume glides down to silence smoothly over the last 10–30s.\nTip: If you're still awake while it fades, tap any volume button to add +5 mins!\n\n💤 2. Reconnect Blocker:\nWhen earbuds disconnect, some models keep trying to reconnect, beeping in your ear and draining battery.\nThis blocker keeps them cleanly disconnected so you sleep peacefully.\n\n👉 Tap 'Volume Fade' or 'Reconnect Cooldown' below to customize!",
-                completedPrompt = "✓ Sleep protection configured! Music fades out gently, and Bluetooth reconnects are blocked while you sleep.",
+                totalSteps = 6,
+                badge = "STEP 2 OF 6 • VOLUME FADE",
+                title = "Gentle Sleep Fade Out",
+                prompt = "🎵 Instead of cutting audio abruptly (which jolts your brain awake), volume glides down smoothly over 10–30s.\n\n💡 Pro tip: If you're still awake while it fades, tap any physical volume button on your phone to add +5 mins!",
+                completedPrompt = "✓ Volume fade configured! Tap the 'Volume Fade' card below anytime to customize duration.",
                 icon = Icons.AutoMirrored.Rounded.VolumeDown,
                 accentColor = AccentPurple
             ),
             InteractiveStage(
                 step = 3,
-                totalSteps = 4,
-                badge = "STEP 3 • BATTERY MONITOR",
-                title = "Live Headphone Telemetry",
-                prompt = "👉 Monitors your Left bud, Right bud, and charging case battery in real time so you wake up powered.",
-                completedPrompt = "✓ Earbud telemetry monitored! SleepBT also tracks your daily and weekly hearing exposure.",
-                icon = Icons.Rounded.BatteryChargingFull,
-                accentColor = StatusGreen
+                totalSteps = 6,
+                badge = "STEP 3 OF 6 • RECONNECT BLOCKER",
+                title = "Sleep Protection Cooldown",
+                prompt = "💤 When Bluetooth turns off, some earbuds keep trying to reconnect, beeping in your ear and draining battery.\n\nSleepBT blocks reconnects during your cooldown (0–120s) so you stay asleep peacefully.",
+                completedPrompt = "✓ Reconnect Blocker active! Earbuds are prevented from waking you up.",
+                icon = Icons.Rounded.Shield,
+                accentColor = AccentTeal
             ),
             InteractiveStage(
                 step = 4,
-                totalSteps = 4,
-                badge = "STEP 4 • READY FOR SLEEP",
-                title = "Start Sleep Protection",
-                prompt = "👉 When you lie down for bed, tap the Start button below. SleepBT handles the rest automatically!",
-                completedPrompt = "✓ You are ready! Music will stop, Bluetooth will disconnect, and your battery will be saved.",
-                icon = Icons.Rounded.NightsStay,
+                totalSteps = 6,
+                badge = "STEP 4 OF 6 • USAGE & TARGETS",
+                title = "Usage Stats & Primary Target",
+                prompt = "📊 Check the Usage tab to see daily & weekly listening history.\n\n⭐ Tap the Star ★ on your connected earbuds on Home or Usage to mark it as your Primary Sleep Target!",
+                completedPrompt = "✓ Usage tracking active! Sessions and favorite targets are securely stored on device.",
+                icon = Icons.Rounded.BarChart,
+                accentColor = AccentCyan
+            ),
+            InteractiveStage(
+                step = 5,
+                totalSteps = 6,
+                badge = "STEP 5 OF 6 • HEARING HEALTH",
+                title = "WHO-Standard Ear Care",
+                prompt = "❤️ The Health tab monitors your daily audio dose, ear rest score, and fatigue risk (Low, Moderate, High) to protect your hearing over time.",
+                completedPrompt = "✓ Ear health monitored! Keeps your ears safe and well-rested.",
+                icon = Icons.Rounded.Favorite,
                 accentColor = StatusGreen
+            ),
+            InteractiveStage(
+                step = 6,
+                totalSteps = 6,
+                badge = "STEP 6 OF 6 • SETTINGS & CONTROLS",
+                title = "Tailor Your Preferences",
+                prompt = "⚙️ In Settings, adjust auto-extend minutes, warning alert lead times, dark/light theme, and optional rootless Shizuku controls.\n\nYou're all set!",
+                completedPrompt = "✓ You are ready! Tap 'Start Sleep Timer' below whenever you head to bed.",
+                icon = Icons.Rounded.Settings,
+                accentColor = StatusOrange
             )
         )
     }

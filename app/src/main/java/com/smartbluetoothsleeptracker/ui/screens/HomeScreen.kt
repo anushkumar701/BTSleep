@@ -983,7 +983,7 @@ fun HomeScreen(
         ) {
             com.smartbluetoothsleeptracker.ui.components.InteractiveTutorialBanner(
                 step = tutorialStep,
-                totalSteps = 4,
+                totalSteps = 6,
                 userInteractedWithDial = userInteractedWithDial,
                 userInteractedWithFade = userInteractedWithFade,
                 selectedMinutes = state.selectedMinutes,
@@ -1719,31 +1719,11 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
     val context = LocalContext.current
     val app = context.applicationContext as? com.smartbluetoothsleeptracker.SleepBTApp
 
-    var hasScanPermission by remember {
-        mutableStateOf(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-            } else true
-        )
+    val hasScanPermission = remember(activeDevice.address) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+        } else true
     }
-
-    val coroutineScope = rememberCoroutineScope()
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        hasScanPermission = isGranted
-        if (isGranted) {
-            val dev = activeDevice.device
-            if (dev != null) {
-                coroutineScope.launch {
-                    app?.btMonitor?.queryCaseBattery(dev, activeDevice.name)
-                }
-            }
-        }
-    }
-
-    val isAppleDevice = activeDevice.name.contains("AirPods", ignoreCase = true) ||
-            activeDevice.name.contains("Beats", ignoreCase = true)
 
     // Poll case battery while Home screen is visible and an earbuds device is connected
     LaunchedEffect(activeDevice.address, hasScanPermission) {
@@ -1859,56 +1839,19 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
                         icon = Icons.Rounded.Hearing
                     )
 
-                    VerticalDivider(
-                        modifier = Modifier.height(26.dp),
-                        color = Surface3,
-                        thickness = 1.dp
-                    )
+                    if (isCaseKnown) {
+                        VerticalDivider(
+                            modifier = Modifier.height(26.dp),
+                            color = Surface3,
+                            thickness = 1.dp
+                        )
 
-                    EarbudBatteryItem(
-                        label = "Case",
-                        level = caseLvl,
-                        icon = Icons.Rounded.Inbox,
-                        isCharging = caseBat?.charging,
-                        subtext = caseSubtext
-                    )
-                }
-
-                // Case support & permission explanation
-                val caseLvlCheck = if (battery.caseLevel in 0..100) battery.caseLevel else -1
-                if (caseLvlCheck !in 0..100) {
-                    val needPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isAppleDevice && !hasScanPermission
-                    if (needPermission) {
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                        permissionLauncher.launch(Manifest.permission.BLUETOOTH_SCAN)
-                                    }
-                                }
-                                .padding(vertical = 2.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Allow Nearby devices to see the case battery",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = 11.sp,
-                                color = AccentBlue,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else if (battery.caseSupport is com.smartbluetoothsleeptracker.core.bluetooth.case.CaseSupport.Unsupported) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "Case battery isn't available for this earbud",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = 11.sp,
-                            color = TextTertiary,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
+                        EarbudBatteryItem(
+                            label = "Case",
+                            level = caseLvl,
+                            icon = Icons.Rounded.Inbox,
+                            isCharging = caseBat?.charging,
+                            subtext = caseSubtext
                         )
                     }
                 }
