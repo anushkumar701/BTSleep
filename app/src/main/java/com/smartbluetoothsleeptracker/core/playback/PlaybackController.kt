@@ -221,7 +221,14 @@ class PlaybackController(private val context: Context) {
                             return
                         }
 
-                        // 2. If volume increased (newVol > prevVol or currentVol > lastProgrammaticVolume),
+                        // 2. Check if volume change matches an internally requested programmatic fade step FIRST!
+                        val isInternal = internalVolumeChanges.any { it.first == currentVol }
+                        if (isInternal || (now - lastProgrammaticChangeTime < 600L && currentVol <= lastProgrammaticVolume)) {
+                            Log.d(TAG, "Volume change event ($currentVol) matched programmatic fade step — ignoring")
+                            return
+                        }
+
+                        // 3. If volume genuinely increased (newVol > prevVol or currentVol > lastProgrammaticVolume) and was NOT an internal step,
                         // this is DEFINITIVELY the user pressing Volume Up to stay awake! Programmatic fade only decreases volume.
                         if ((prevVol != -1 && currentVol > prevVol) || (lastProgrammaticVolume in 0..100 && currentVol > lastProgrammaticVolume)) {
                             Log.i(TAG, "Volume increased ($lastProgrammaticVolume -> $currentVol) from user key press! Cancelling fade.")
@@ -229,15 +236,7 @@ class PlaybackController(private val context: Context) {
                             return
                         }
 
-                        // 3. Check if volume change matches an internally requested programmatic fade step
-                        val isInternal = internalVolumeChanges.any { it.first == currentVol }
-                        if (isInternal || (now - lastProgrammaticChangeTime < 600L && currentVol <= lastProgrammaticVolume)) {
-                            Log.d(TAG, "Volume change event ($currentVol) matched programmatic fade step — ignoring")
-                            return
-                        }
-
-                        // 4. Volume dropped significantly or changed unexpectedly outside our fade step:
-                        // User deliberately adjusted volume with physical keys
+                        // 4. External volume adjustment detected outside our fade steps
                         if (now - lastProgrammaticChangeTime >= 600L && currentVol != lastProgrammaticVolume) {
                             Log.i(TAG, "Volume change ($currentVol) detected from EXTERNAL USER KEY PRESS! Cancelling fade.")
                             userCancelled = true
