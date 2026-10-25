@@ -7,18 +7,24 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.util.Log
+import com.smartbluetoothsleeptracker.core.bluetooth.case.CaseBattery
+import com.smartbluetoothsleeptracker.core.bluetooth.case.CaseBatteryProvider
+import com.smartbluetoothsleeptracker.core.bluetooth.case.CaseSupport
 import com.smartbluetoothsleeptracker.data.db.AppDatabase
 import com.smartbluetoothsleeptracker.data.db.DeviceEntity
 import com.smartbluetoothsleeptracker.data.db.DeviceType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
 data class BatteryInfo(
     val mainLevel: Int = -1,    // 0..100, -1 = unknown
     val leftLevel: Int = -1,    // 0..100, -1 = unknown
     val rightLevel: Int = -1,   // 0..100, -1 = unknown
-    val caseLevel: Int = -1     // 0..100, -1 = unknown
+    val caseLevel: Int = -1,    // 0..100, -1 = unknown
+    val caseBattery: CaseBattery? = null,
+    val caseSupport: CaseSupport = CaseSupport.Unsupported
 ) {
     val isKnown: Boolean
         get() = (mainLevel in 0..100) || (leftLevel in 0..100) || (rightLevel in 0..100) || (caseLevel in 0..100)
@@ -61,6 +67,48 @@ class BluetoothMonitor(
 
     private val aclConnectedAddresses = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val deviceBatteryCache = java.util.concurrent.ConcurrentHashMap<String, BatteryInfo>()
+
+    val caseProviders = mutableListOf<CaseBatteryProvider>()
+    private val caseBatteryCache = ConcurrentHashMap<String, CaseBattery>()
+
+    fun registerCaseProvider(provider: CaseBatteryProvider) {
+        if (!caseProviders.contains(provider)) {
+            caseProviders.add(provider)
+        }
+    }
+
+    fun getCaseSupport(device: BluetoothDevice, name: String = ""): CaseSupport {
+        val devName = name.ifBlank {
+            try { device.name ?: "" } catch (_: SecurityException) { "" }
+        }
+        return if (caseProviders.any { it.supports(device, devName) }) {
+            CaseSupport.Supported
+        } else {
+            CaseSupport.Unsupported
+        }
+    }
+
+    fun updateCaseBattery(address: String, caseBattery: CaseBattery) {
+        caseBatteryCache[address] = caseBattery
+        val current = deviceBatteryCache[address] ?: BatteryInfo()
+        deviceBatteryCache[address] = current.copy(
+            caseLevel = caseBattery.percent,
+            caseBattery = caseBattery
+        )
+        scope.launch { refreshConnectedDevices() }
+    }
+
+    suspend fun queryCaseBattery(device: BluetoothDevice, name: String = ""): CaseBattery? {
+        val devName = name.ifBlank {
+            try { device.name ?: "" } catch (_: SecurityException) { "" }
+        }
+        val provider = caseProviders.firstOrNull { it.supports(device, devName) } ?: return null
+        val result = runCatching { provider.read(device) }.getOrNull()
+        if (result != null) {
+            updateCaseBattery(device.address, result)
+        }
+        return result
+    }
 
     private var a2dpProfile: BluetoothProfile? = null
     private var headsetProfile: BluetoothProfile? = null
@@ -575,11 +623,20 @@ class BluetoothMonitor(
             if (right in 0..100) putInt("right_${device.address}", right)
         }.apply()
 
+        val devName = try { device.name ?: "" } catch (_: SecurityException) { "" }
+        val support = getCaseSupport(device, devName)
+        val caseBat = caseBatteryCache[device.address]
+        if (case == -1 && caseBat != null && caseBat.percent in 0..100) {
+            case = caseBat.percent
+        }
+
         val info = BatteryInfo(
             mainLevel = main,
             leftLevel = left,
             rightLevel = right,
-            caseLevel = case
+            caseLevel = case,
+            caseBattery = caseBat,
+            caseSupport = support
         )
         deviceBatteryCache[device.address] = info
         return info
