@@ -83,19 +83,6 @@ class BluetoothMonitor(
         }
     }
 
-    private fun parseBatteryBytes(bytes: ByteArray?): Int? {
-        if (bytes == null || bytes.isEmpty()) return null
-        val str = String(bytes, Charsets.UTF_8).trim()
-        val numStr = str.split(",", ";", " ", "%", "\u0000")[0].trim()
-        val parsedInt = numStr.toIntOrNull()
-        if (parsedInt != null && parsedInt in 0..100) return parsedInt
-        val firstByte = bytes[0].toInt() and 0xFF
-        if (firstByte in 0..100 && (firstByte < 48 || firstByte > 57 || bytes.size == 1)) {
-            return firstByte
-        }
-        return null
-    }
-
     private val receiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -166,71 +153,10 @@ class BluetoothMonitor(
                 "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED",
                 "com.android.bluetooth.btservice.action.BATTERY_LEVEL_CHANGED" -> {
                     val lvl = intent.getIntExtra("android.bluetooth.device.extra.BATTERY_LEVEL", -1)
-                    val caseLvl = intent.getIntExtra("android.bluetooth.device.extra.BATTERY_LEVEL_CASE", -1).let {
-                        if (it in 0..100) it else intent.getIntExtra("case_battery", -1)
-                    }.let {
-                        if (it in 0..100) it else intent.getIntExtra("case_level", -1)
-                    }
-                    if (device != null) {
+                    if (device != null && lvl in 0..100) {
                         val current = deviceBatteryCache[device.address] ?: BatteryInfo()
-                        val updated = current.copy(
-                            mainLevel = if (lvl in 0..100) lvl else current.mainLevel,
-                            caseLevel = if (caseLvl in 0..100) caseLvl else current.caseLevel
-                        )
+                        val updated = current.copy(mainLevel = lvl)
                         deviceBatteryCache[device.address] = updated
-                        if (caseLvl in 0..100) {
-                            val prefs = context.getSharedPreferences("device_battery_prefs", Context.MODE_PRIVATE)
-                            prefs.edit().putInt("case_${device.address}", caseLvl).apply()
-                        }
-                    }
-                    scope.launch { refreshConnectedDevices() }
-                }
-                "com.google.android.gms.nearby.fastpair.ACTION_STATUS_CHANGED",
-                "com.samsung.accessory.intent.action.BATTERY_UPDATE" -> {
-                    val caseLvl = intent.getIntExtra("battery_case", -1).let {
-                        if (it in 0..100) it else intent.getIntExtra("case_battery", -1)
-                    }.let {
-                        if (it in 0..100) it else intent.getIntExtra("com.samsung.accessory.extra.CASE_BATTERY", -1)
-                    }
-                    val leftLvl = intent.getIntExtra("battery_left", -1)
-                    val rightLvl = intent.getIntExtra("battery_right", -1)
-                    if (device != null) {
-                        val current = deviceBatteryCache[device.address] ?: BatteryInfo()
-                        val updated = current.copy(
-                            caseLevel = if (caseLvl in 0..100) caseLvl else current.caseLevel,
-                            leftLevel = if (leftLvl in 0..100) leftLvl else current.leftLevel,
-                            rightLevel = if (rightLvl in 0..100) rightLvl else current.rightLevel
-                        )
-                        deviceBatteryCache[device.address] = updated
-                        if (caseLvl in 0..100) {
-                            val prefs = context.getSharedPreferences("device_battery_prefs", Context.MODE_PRIVATE)
-                            prefs.edit().putInt("case_${device.address}", caseLvl).apply()
-                        }
-                    }
-                    scope.launch { refreshConnectedDevices() }
-                }
-                "android.bluetooth.device.action.METADATA_CHANGED" -> {
-                    if (device != null) {
-                        val key = intent.getIntExtra("android.bluetooth.device.extra.KEY", -1)
-                        val value = intent.getByteArrayExtra("android.bluetooth.device.extra.VALUE")
-                        if (key != -1 && value != null) {
-                            val parsed = parseBatteryBytes(value)
-                            if (parsed != null && parsed in 0..100) {
-                                val current = deviceBatteryCache[device.address] ?: BatteryInfo()
-                                val updated = when (key) {
-                                    10 -> current.copy(leftLevel = parsed)
-                                    11 -> current.copy(rightLevel = parsed)
-                                    12, 19 -> current.copy(caseLevel = parsed)
-                                    18 -> current.copy(mainLevel = parsed)
-                                    else -> current
-                                }
-                                deviceBatteryCache[device.address] = updated
-                                if (key == 12 || key == 19) {
-                                    val prefs = context.getSharedPreferences("device_battery_prefs", Context.MODE_PRIVATE)
-                                    prefs.edit().putInt("case_${device.address}", parsed).apply()
-                                }
-                            }
-                        }
                     }
                     scope.launch { refreshConnectedDevices() }
                 }
@@ -246,20 +172,32 @@ class BluetoothMonitor(
                                 while (i < args.size) {
                                     val k = (args[i] as? Number)?.toInt() ?: (args[i] as? String)?.toIntOrNull()
                                     val v = if (i + 1 < args.size) (args[i + 1] as? Number)?.toInt() ?: (args[i + 1] as? String)?.toIntOrNull() else null
-                                    if (k != null && v != null) {
-                                        val pct = if (v in 0..9) (v + 1) * 10 else v.coerceIn(0, 100)
-                                        when (k) {
-                                            1 -> current = current.copy(mainLevel = pct)
-                                            2, 3 -> {
-                                                current = current.copy(caseLevel = pct)
-                                                val prefs = context.getSharedPreferences("device_battery_prefs", Context.MODE_PRIVATE)
-                                                prefs.edit().putInt("case_${device.address}", pct).apply()
-                                            }
-                                        }
+                                    if (k == 1 && v != null && v in 0..9) {
+                                        val pct = (v + 1) * 10
+                                        current = current.copy(mainLevel = pct)
                                     }
                                     i += 2
                                 }
                                 deviceBatteryCache[device.address] = current
+                            }
+                        }
+                    } else if (cmd == "+XEVENT" && device != null) {
+                        @Suppress("DEPRECATION")
+                        val args = intent.getSerializableExtra(BluetoothHeadset.EXTRA_VENDOR_SPECIFIC_HEADSET_EVENT_ARGS) as? Array<*>
+                        if (args != null) {
+                            runCatching {
+                                var current = deviceBatteryCache[device.address] ?: BatteryInfo()
+                                for (idx in args.indices) {
+                                    if (args[idx]?.toString()?.equals("BATTERY", ignoreCase = true) == true && idx + 2 < args.size) {
+                                        val lvl = (args[idx + 1] as? Number)?.toInt() ?: (args[idx + 1] as? String)?.toIntOrNull()
+                                        val total = (args[idx + 2] as? Number)?.toInt() ?: (args[idx + 2] as? String)?.toIntOrNull()
+                                        if (lvl != null && total != null && total > 0) {
+                                            val pct = ((lvl.toFloat() / total) * 100).toInt().coerceIn(0, 100)
+                                            current = current.copy(mainLevel = pct)
+                                            deviceBatteryCache[device.address] = current
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -595,39 +533,11 @@ class BluetoothMonitor(
             if (case == -1 && cached.caseLevel in 0..100) case = cached.caseLevel
         }
 
-        // 3. Google Fast Pair & Untethered Earbud Metadata (API 29+)
-        // METADATA_UNTETHERED_LEFT_BATTERY = 10, RIGHT = 11, CASE = 12, MAIN = 18, CASE_FALLBACK = 19
-        runCatching {
-            val getMeta = try {
-                device.javaClass.getDeclaredMethod("getMetadata", Int::class.javaPrimitiveType).apply { isAccessible = true }
-            } catch (_: Exception) {
-                device.javaClass.getMethod("getMetadata", Int::class.javaPrimitiveType)
-            }
-            val leftBytes = getMeta.invoke(device, 10) as? ByteArray
-            val rightBytes = getMeta.invoke(device, 11) as? ByteArray
-            val caseBytes = (getMeta.invoke(device, 12) as? ByteArray) ?: (getMeta.invoke(device, 19) as? ByteArray)
-            val mainBytes = getMeta.invoke(device, 18) as? ByteArray
-
-            parseBatteryBytes(leftBytes)?.let { left = it }
-            parseBatteryBytes(rightBytes)?.let { right = it }
-            parseBatteryBytes(caseBytes)?.let { case = it }
-            if (main == -1) {
-                parseBatteryBytes(mainBytes)?.let { main = it }
-            }
-        }
-
         val devType = inferDeviceType(device)
         val isEarbuds = devType == DeviceType.EARBUDS
 
         // 4. Persistent cache check (SharedPreferences)
         val prefs = context.getSharedPreferences("device_battery_prefs", Context.MODE_PRIVATE)
-        // One-time cleanup of legacy synthetic case entries
-        if (!prefs.getBoolean("cleared_fake_case_v2", false)) {
-            prefs.edit().apply {
-                prefs.all.keys.filter { it.startsWith("case_") }.forEach { remove(it) }
-                putBoolean("cleared_fake_case_v2", true)
-            }.apply()
-        }
 
         if (left == -1) {
             val p = prefs.getInt("left_${device.address}", -1)
@@ -636,10 +546,6 @@ class BluetoothMonitor(
         if (right == -1) {
             val p = prefs.getInt("right_${device.address}", -1)
             if (p in 0..100) right = p
-        }
-        if (case == -1) {
-            val p = prefs.getInt("case_${device.address}", -1)
-            if (p in 0..100) case = p
         }
 
         // 5. Harmonize Left and Right for TWS Earbuds
@@ -658,16 +564,15 @@ class BluetoothMonitor(
             }
 
             // Case battery: NEVER synthesize case percentage from earbuds!
-            // If the case does not broadcast its own BLE/FastPair telemetry or is closed,
+            // If the case does not broadcast its own telemetry or is closed,
             // case remains -1 so UI accurately displays "--".
         }
 
-        // 6. Persist confirmed levels to SharedPreferences
+        // 6. Persist confirmed levels to SharedPreferences (main, left, right only)
         prefs.edit().apply {
             if (main in 0..100) putInt("main_${device.address}", main)
             if (left in 0..100) putInt("left_${device.address}", left)
             if (right in 0..100) putInt("right_${device.address}", right)
-            if (case in 0..100) putInt("case_${device.address}", case)
         }.apply()
 
         val info = BatteryInfo(

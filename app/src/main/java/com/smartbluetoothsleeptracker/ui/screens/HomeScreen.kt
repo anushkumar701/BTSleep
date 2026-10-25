@@ -1905,11 +1905,11 @@ private fun EarbudBatteryItem(
 ) {
     val isKnown = level in 0..100
     val color = when {
-        !isKnown && isCase -> StatusGreen
+        !isKnown -> TextTertiary
         level >= 50 -> StatusGreen
         level in 20..49 -> StatusOrange
         level in 0..19 -> StatusRed
-        else -> AccentBlue
+        else -> TextTertiary
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -1930,7 +1930,7 @@ private fun EarbudBatteryItem(
                 color = TextTertiary
             )
             Text(
-                text = if (isKnown) "$level%" else if (isCase) "Good" else "Connected",
+                text = if (isKnown) "$level%" else "--",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
                 color = color
