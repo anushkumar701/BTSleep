@@ -128,7 +128,18 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         // ── Unified Per-Device Stats (Sessions + Daily Usage + Live Minutes) ──
         val deviceAddrs = (sessions.map { it.deviceAddress } + dailyUsages.map { it.deviceAddress } + activeAddrs).distinct()
         val stats = deviceAddrs.mapNotNull { addr ->
-            val dev = app.db.deviceDao().getDevice(addr) ?: return@mapNotNull null
+            val dev = app.db.deviceDao().getDevice(addr)
+                ?: connectedDevices.find { it.address == addr }?.let { conn ->
+                    val entity = com.smartbluetoothsleeptracker.data.db.DeviceEntity(
+                        address = conn.address,
+                        name = conn.name,
+                        deviceType = conn.type,
+                        isFavorite = conn.isFavorite
+                    )
+                    app.db.deviceDao().upsert(entity)
+                    entity
+                }
+                ?: return@mapNotNull null
             val devSessions = sessions.filter { it.deviceAddress == addr && it.endTime != null && (it.actualDurationMin ?: 0) > 0 }
             val sessionMins = devSessions.sumOf { it.actualDurationMin ?: 0 }
             val dailyMins = dailyUsages.filter { it.deviceAddress == addr }.sumOf { it.totalMinutes }
@@ -141,7 +152,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
             val hasActiveLive = liveMins > 0
             val count = maxOf(completedCount, dailyCount) + (if (hasActiveLive) 1 else 0)
 
-            if (totalMins > 0 || count > 0) {
+            if (totalMins > 0 || count > 0 || addr in activeAddrs) {
                 DeviceUsageStat(dev, totalMins, count)
             } else {
                 null
@@ -244,7 +255,21 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleFavorite(address: String) {
         viewModelScope.launch {
-            val dev = app.db.deviceDao().getDevice(address) ?: return@launch
+            var dev = app.db.deviceDao().getDevice(address)
+            if (dev == null) {
+                val conn = app.btMonitor.connectedDevices.value.find { it.address == address }
+                if (conn != null) {
+                    dev = com.smartbluetoothsleeptracker.data.db.DeviceEntity(
+                        address = conn.address,
+                        name = conn.name,
+                        deviceType = conn.type,
+                        isFavorite = false
+                    )
+                    app.db.deviceDao().upsert(dev)
+                } else {
+                    return@launch
+                }
+            }
             app.db.deviceDao().setFavorite(address, !dev.isFavorite)
             loadData(_period.value)
             app.btMonitor.refresh()

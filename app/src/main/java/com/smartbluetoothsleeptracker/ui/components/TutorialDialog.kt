@@ -71,7 +71,7 @@ fun InteractiveTutorialBanner(
                 totalSteps = 4,
                 badge = "STEP 2 • SLEEP PROTECTION",
                 title = "Volume Fade & Reconnect Blocker",
-                prompt = "🔊 Volume Fade: Gently lowers music over 10–30s before stopping so sudden silence doesn't wake you up.\n\n🛡️ Reconnect Blocker: Prevents your earbuds or speaker from waking back up and reconnecting while you are sleeping.\n\n👉 Tap 'Volume Fade' or 'Reconnect Cooldown' below to customize!",
+                prompt = "🎵 1. Gentle Fade Out:\nInstead of cutting music abruptly (which jolts your brain awake), volume glides down to silence smoothly over the last 10–30s.\nTip: If you're still awake while it fades, tap any volume button to add +5 mins!\n\n💤 2. Reconnect Blocker:\nWhen earbuds disconnect, some models keep trying to reconnect, beeping in your ear and draining battery.\nThis blocker keeps them cleanly disconnected so you sleep peacefully.\n\n👉 Tap 'Volume Fade' or 'Reconnect Cooldown' below to customize!",
                 completedPrompt = "✓ Sleep protection configured! Music fades out gently, and Bluetooth reconnects are blocked while you sleep.",
                 icon = Icons.AutoMirrored.Rounded.VolumeDown,
                 accentColor = AccentPurple

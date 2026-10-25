@@ -310,7 +310,8 @@ fun HomeScreen(
             ConnectionStatusBar(
                 devices = state.connectedDevices,
                 btEnabled = state.btEnabled,
-                cooldownActive = state.cooldown.active
+                cooldownActive = state.cooldown.active,
+                onToggleFavorite = { viewModel.togglePrimaryDevice(it) }
             )
 
             Spacer(Modifier.height(12.dp))
@@ -1005,7 +1006,8 @@ fun HomeScreen(
 private fun ConnectionStatusBar(
     devices: List<ConnectedDevice>,
     btEnabled: Boolean,
-    cooldownActive: Boolean
+    cooldownActive: Boolean,
+    onToggleFavorite: (String) -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val isClickableAction = (devices.isEmpty() || !btEnabled) && !cooldownActive
@@ -1129,8 +1131,17 @@ private fun ConnectionStatusBar(
         // Action or Favorite indicator
         if (devices.isNotEmpty()) {
             val primary = devices.firstOrNull { it.isFavorite }
-            if (primary != null) {
-                Icon(Icons.Rounded.Star, "Favorited", tint = AccentBlue, modifier = Modifier.size(18.dp))
+            val target = primary ?: devices.first()
+            IconButton(
+                onClick = { onToggleFavorite(target.address) },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = if (primary != null) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                    contentDescription = if (primary != null) "Primary Sleep Target" else "Set as Primary Sleep Target",
+                    tint = if (primary != null) AccentBlue else TextTertiary,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         } else if (isClickableAction) {
             Icon(Icons.Rounded.ChevronRight, "Open Bluetooth settings", tint = TextTertiary, modifier = Modifier.size(18.dp))
@@ -1671,7 +1682,7 @@ private fun RotaryDial(
 
 @Composable
 private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
-    val activeDevice = devices.firstOrNull()
+    val activeDevice = devices.firstOrNull { it.isFavorite } ?: devices.firstOrNull()
 
     if (activeDevice == null) {
         Card(

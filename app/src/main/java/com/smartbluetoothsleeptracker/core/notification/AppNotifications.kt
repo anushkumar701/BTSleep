@@ -78,7 +78,7 @@ object AppNotifications {
 
         val title = when {
             isPaused -> "Paused • $dev"
-            warningText != null -> "Disconnecting Soon • $dev"
+            warningText != null -> "Ending Soon • $dev"
             else -> dev
         }
 
@@ -88,13 +88,17 @@ object AppNotifications {
             endTimeMillis > System.currentTimeMillis() -> {
                 val timeFormat = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
                 val endFormatted = timeFormat.format(java.util.Date(endTimeMillis))
-                "Turns off at $endFormatted • Fades audio"
+                "Turns off at $endFormatted"
             }
             else -> if (remainingText.isNotBlank()) "$remainingText remaining" else "Sleep timer active"
         }
 
         val subText = when {
-            batteryPercent != null && batteryPercent in 0..100 -> "$batteryPercent%"
+            batteryPercent != null && batteryPercent in 0..100 -> {
+                if (warningText != null) "Ending Soon • $batteryPercent%"
+                else if (isPaused) "Paused • $batteryPercent%"
+                else "$batteryPercent%"
+            }
             isPaused -> "Paused"
             warningText != null -> "Ending Soon"
             else -> "SleepBT"

@@ -225,6 +225,32 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.prefs.setSelectedMinutes(m) }
     }
 
+    fun togglePrimaryDevice(address: String) {
+        viewModelScope.launch {
+            var dev = app.db.deviceDao().getDevice(address)
+            if (dev == null) {
+                val conn = app.btMonitor.connectedDevices.value.find { it.address == address }
+                if (conn != null) {
+                    dev = com.smartbluetoothsleeptracker.data.db.DeviceEntity(
+                        address = conn.address,
+                        name = conn.name,
+                        deviceType = conn.type,
+                        isFavorite = false
+                    )
+                    app.db.deviceDao().upsert(dev)
+                } else {
+                    return@launch
+                }
+            }
+            val newFav = !dev.isFavorite
+            app.db.deviceDao().setFavorite(address, newFav)
+            HapticManager.vibrateClick(getApplication())
+            val msg = if (newFav) "Set as Primary Sleep Target" else "Removed from Primary Sleep Targets"
+            android.widget.Toast.makeText(getApplication(), msg, android.widget.Toast.LENGTH_SHORT).show()
+            app.btMonitor.refresh()
+        }
+    }
+
     fun startTimer() {
         val s = _state.value
         val targets = s.connectedDevices

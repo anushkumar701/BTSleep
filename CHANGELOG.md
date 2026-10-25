@@ -2,6 +2,22 @@
 
 All notable changes to **SleepBT** are documented in this file.
 
+## [1.0.5] - 2026-10-25
+
+### Summary
+Human-perspective real-world test case audit and hardening across bedtime falling asleep scenarios, premature disconnects, VoIP call isolation, physical volume button responsiveness, smartwatch coexistence, neat notification presentation, and UI responsiveness.
+
+### 🧪 Human Persona Test Scenarios & Fixes
+- **Bedtime False Auto-Extend Fix**: Fixed race condition where Android 14+ internal volume fade downward steps were misclassified as user volume-up inputs when broadcast delivery was delayed. Hardened detection in `PlaybackController` to verify `newVol > prevVol` and `currentVol > lastProgrammaticVolume`.
+- **Physical Volume Key Extension in Warning & Fade Windows**: Registered `VOLUME_CHANGED_ACTION` with `RECEIVER_EXPORTED` on Android 14+ (API 34+) and added an active warning volume listener during the pre-disconnect alert window, enabling one-touch volume button extension.
+- **VoIP & Cellular Call Protection**: Added `AudioManager.MODE_IN_COMMUNICATION` check alongside telephony calls (`MODE_IN_CALL`, `MODE_RINGTONE`), safeguarding active WhatsApp, Telegram, Google Meet, Zoom, and Discord calls from mid-call audio cutoff.
+- **Smartwatch & Multi-Device Isolation**: Hardened `TimerService` disconnector to only target the designated audio peripheral, preventing paired fitness bands, smartwatches, or LE peripherals from unexpected disconnection.
+- **Silent Speaker Leak Protection**: In `finishSessionOnManualDisconnect()`, immediately calls `stealAudioFocusAndPause()` when earbuds are put in the charging case or disconnected mid-timer, preventing ambient sleep sounds or music from blaring out of the phone speaker.
+- **Safe Volume Restoration**: In `restoreVolume()`, forces audio pause prior to restoring media volume, preventing sudden audio blasts on the phone speaker.
+- **Interactive Primary Sleep Target on Home Screen**: Tapping the star badge on `ConnectionStatusBar` now directly toggles the Primary Sleep Target device with instantaneous UI feedback and DB upsert fallback for newly paired devices.
+- **Sleek Minimalist Notifications**: Eliminated redundant "Disconnecting" titles; streamlined status to `Ending Soon • [Device]` with clear remaining time badge (`Ending Soon • 85%`) and one-tap extension actions.
+- **Zero-Lag Concurrent App Refresh**: Added `refreshMutex` with `tryLock()` guard and single-query batch DB caching in `BluetoothMonitor`, eliminating UI stutter and queued refresh storms.
+
 ## [1.0.4] - 2026-10-14
 
 ### Summary

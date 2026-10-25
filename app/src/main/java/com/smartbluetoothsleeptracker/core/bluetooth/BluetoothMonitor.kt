@@ -67,6 +67,7 @@ class BluetoothMonitor(
 
     private val aclConnectedAddresses = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val deviceBatteryCache = java.util.concurrent.ConcurrentHashMap<String, BatteryInfo>()
+    private val refreshMutex = kotlinx.coroutines.sync.Mutex()
 
     val caseProviders = mutableListOf<CaseBatteryProvider>()
     private val caseBatteryCache = ConcurrentHashMap<String, CaseBattery>()
@@ -340,138 +341,144 @@ class BluetoothMonitor(
 
     @SuppressLint("MissingPermission")
     suspend fun refreshConnectedDevices() {
-        val connected = mutableListOf<ConnectedDevice>()
+        if (!refreshMutex.tryLock()) return
+        try {
+            val connected = mutableListOf<ConnectedDevice>()
+            val allDbDevices = db.deviceDao().getAllNow().associateBy { it.address }
 
-        // 1. Check if Wired Headset is plugged in
-        if (com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.isWiredConnected(context)) {
-            val dbDevice = db.deviceDao().getDevice(com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS)
-            connected.add(
-                ConnectedDevice(
-                    address = com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS,
-                    name = dbDevice?.name ?: com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_NAME,
-                    isFavorite = dbDevice?.isFavorite ?: false,
-                    type = DeviceType.WIRED_HEADPHONES
+            // 1. Check if Wired Headset is plugged in
+            if (com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.isWiredConnected(context)) {
+                val dbDevice = allDbDevices[com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS]
+                connected.add(
+                    ConnectedDevice(
+                        address = com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS,
+                        name = dbDevice?.name ?: com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_NAME,
+                        isFavorite = dbDevice?.isFavorite ?: false,
+                        type = DeviceType.WIRED_HEADPHONES
+                    )
                 )
-            )
-        }
+            }
 
-        val ad = adapter
-        if (ad != null && ad.isEnabled) {
-            runCatching {
-                // 2. Synchronous AudioManager check for active Bluetooth audio outputs (zero latency, never hangs)
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
-                val activeAudioOutputDevices = audioManager?.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS) ?: emptyArray()
-                val btAudioOutputs = activeAudioOutputDevices.filter {
-                    it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
-                    it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                    (android.os.Build.VERSION.SDK_INT >= 31 && (
-                        it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET ||
-                        it.type == android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER
-                    ))
-                }
-
-                val audioDeviceNames = btAudioOutputs.map { it.productName.toString().trim() }.filter { it.isNotBlank() }
-                val audioDeviceAddresses = btAudioOutputs.mapNotNull { it.address.takeIf { addr -> addr.isNotBlank() } }
-
-                // 3. Fast profile connection state queries (synchronous IPC)
-                val isA2dpActive = ad.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothAdapter.STATE_CONNECTED
-                val isHeadsetActive = ad.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothAdapter.STATE_CONNECTED
-
-                // 4. Synchronous profile query via cached profile proxies (0ms latency!)
-                val profileDevices = mutableListOf<BluetoothDevice>()
-                if (isA2dpActive) {
-                    a2dpProfile?.let { runCatching { profileDevices.addAll(it.connectedDevices) } }
-                }
-                if (isHeadsetActive) {
-                    headsetProfile?.let { runCatching { profileDevices.addAll(it.connectedDevices) } }
-                }
-                // Fallback only if proxies are not yet bound and a profile is active
-                if (profileDevices.isEmpty() && (isA2dpActive || isHeadsetActive)) {
-                    val fallback = withTimeoutOrNull(200L) {
-                        coroutineScope {
-                            val a2dpDef = if (isA2dpActive) async { getProfileDevices(ad, BluetoothProfile.A2DP) } else null
-                            val headsetDef = if (isHeadsetActive) async { getProfileDevices(ad, BluetoothProfile.HEADSET) } else null
-                            ((a2dpDef?.await() ?: emptyList()) + (headsetDef?.await() ?: emptyList()))
-                        }
-                    } ?: emptyList()
-                    profileDevices.addAll(fallback)
-                }
-
-                val profileConnectedAddresses = profileDevices.map { it.address }.toSet()
-                val bonded = ad.bondedDevices ?: emptySet()
-
-                val isAudioActive = isA2dpActive || isHeadsetActive
-                val hasBtAudioOutputs = btAudioOutputs.isNotEmpty()
-
-                bonded.forEach { device ->
-                    val devAddr = device.address
-                    val devName = device.name ?: ""
-
-                    val isConnectedByProfile = profileConnectedAddresses.contains(devAddr)
-                    val isConnectedByAudioAddress = audioDeviceAddresses.contains(devAddr)
-                    val isConnectedByAudioName = devName.isNotBlank() && audioDeviceNames.any { it.equals(devName, ignoreCase = true) }
-                    val isConnectedByAcl = aclConnectedAddresses.contains(devAddr)
-                    val isReflectConnected = runCatching {
-                        val m = device.javaClass.getDeclaredMethod("isConnected")
-                        m.isAccessible = true
-                        m.invoke(device) as? Boolean ?: false
-                    }.getOrDefault(false)
-
-                    // Ground-truth check:
-                    // If AudioManager has no BT audio outputs AND no profiles are active on adapter,
-                    // this device CANNOT be physically connected for audio.
-                    if (!hasBtAudioOutputs && !isAudioActive && !isConnectedByProfile) {
-                        aclConnectedAddresses.remove(devAddr)
-                        return@forEach
+            val ad = adapter
+            if (ad != null && ad.isEnabled) {
+                runCatching {
+                    // 2. Synchronous AudioManager check for active Bluetooth audio outputs (zero latency, never hangs)
+                    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+                    val activeAudioOutputDevices = audioManager?.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS) ?: emptyArray()
+                    val btAudioOutputs = activeAudioOutputDevices.filter {
+                        it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        (android.os.Build.VERSION.SDK_INT >= 31 && (
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER
+                        ))
                     }
 
-                    // A device is genuinely connected if:
-                    // 1) Specifically listed in profile connected devices, OR
-                    // 2) Specifically listed in active AudioManager outputs (by MAC or name), OR
-                    // 3) Reflection reports connected AND an audio profile is globally active AND ACL or name matches
-                    val isConn = isConnectedByProfile || isConnectedByAudioAddress || isConnectedByAudioName ||
-                            (isReflectConnected && isAudioActive && (isConnectedByAcl || isConnectedByAudioName))
+                    val audioDeviceNames = btAudioOutputs.map { it.productName.toString().trim() }.filter { it.isNotBlank() }
+                    val audioDeviceAddresses = btAudioOutputs.mapNotNull { it.address.takeIf { addr -> addr.isNotBlank() } }
 
-                    if (!isConn) {
-                        aclConnectedAddresses.remove(devAddr)
-                        return@forEach
+                    // 3. Fast profile connection state queries (synchronous IPC)
+                    val isA2dpActive = ad.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothAdapter.STATE_CONNECTED
+                    val isHeadsetActive = ad.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothAdapter.STATE_CONNECTED
+
+                    // 4. Synchronous profile query via cached profile proxies (0ms latency!)
+                    val profileDevices = mutableListOf<BluetoothDevice>()
+                    if (isA2dpActive) {
+                        a2dpProfile?.let { runCatching { profileDevices.addAll(it.connectedDevices) } }
+                    }
+                    if (isHeadsetActive) {
+                        headsetProfile?.let { runCatching { profileDevices.addAll(it.connectedDevices) } }
+                    }
+                    // Fallback only if proxies are not yet bound and a profile is active
+                    if (profileDevices.isEmpty() && (isA2dpActive || isHeadsetActive)) {
+                        val fallback = withTimeoutOrNull(200L) {
+                            coroutineScope {
+                                val a2dpDef = if (isA2dpActive) async { getProfileDevices(ad, BluetoothProfile.A2DP) } else null
+                                val headsetDef = if (isHeadsetActive) async { getProfileDevices(ad, BluetoothProfile.HEADSET) } else null
+                                ((a2dpDef?.await() ?: emptyList()) + (headsetDef?.await() ?: emptyList()))
+                            }
+                        } ?: emptyList()
+                        profileDevices.addAll(fallback)
                     }
 
-                    if (isConn) {
-                        com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(
-                            context, devAddr, System.currentTimeMillis()
-                        )
-                        val dbDevice = db.deviceDao().getDevice(devAddr)
-                        val inferred = inferDeviceType(device)
-                        // If DB previously auto-saved EARBUDS by default, but new detection identifies NECKBAND, auto-correct it
-                        val devType = if (dbDevice == null) {
-                            inferred
-                        } else if (dbDevice.deviceType == DeviceType.EARBUDS && inferred == DeviceType.NECKBAND) {
-                            scope.launch { db.deviceDao().setDeviceType(devAddr, DeviceType.NECKBAND) }
-                            DeviceType.NECKBAND
-                        } else if (dbDevice.deviceType == DeviceType.OTHER && inferred != DeviceType.OTHER) {
-                            scope.launch { db.deviceDao().setDeviceType(devAddr, inferred) }
-                            inferred
-                        } else {
-                            dbDevice.deviceType
+                    val profileConnectedAddresses = profileDevices.map { it.address }.toSet()
+                    val bonded = ad.bondedDevices ?: emptySet()
+
+                    val isAudioActive = isA2dpActive || isHeadsetActive
+                    val hasBtAudioOutputs = btAudioOutputs.isNotEmpty()
+
+                    bonded.forEach { device ->
+                        val devAddr = device.address
+                        val devName = device.name ?: ""
+
+                        val isConnectedByProfile = profileConnectedAddresses.contains(devAddr)
+                        val isConnectedByAudioAddress = audioDeviceAddresses.contains(devAddr)
+                        val isConnectedByAudioName = devName.isNotBlank() && audioDeviceNames.any { it.equals(devName, ignoreCase = true) }
+                        val isConnectedByAcl = aclConnectedAddresses.contains(devAddr)
+                        val isReflectConnected = runCatching {
+                            val m = device.javaClass.getDeclaredMethod("isConnected")
+                            m.isAccessible = true
+                            m.invoke(device) as? Boolean ?: false
+                        }.getOrDefault(false)
+
+                        // Ground-truth check:
+                        // If AudioManager has no BT audio outputs AND no profiles are active on adapter,
+                        // this device CANNOT be physically connected for audio.
+                        if (!hasBtAudioOutputs && !isAudioActive && !isConnectedByProfile) {
+                            aclConnectedAddresses.remove(devAddr)
+                            return@forEach
                         }
-                        val batteryInfo = readBatteryInfo(device)
-                        connected.add(
-                            ConnectedDevice(
-                                address = devAddr,
-                                name = if (devName.isNotBlank()) devName else devAddr,
-                                isFavorite = dbDevice?.isFavorite ?: false,
-                                type = devType,
-                                device = device,
-                                battery = batteryInfo
+
+                        // A device is genuinely connected if:
+                        // 1) Specifically listed in profile connected devices, OR
+                        // 2) Specifically listed in active AudioManager outputs (by MAC or name), OR
+                        // 3) Reflection reports connected AND an audio profile is globally active AND ACL or name matches
+                        val isConn = isConnectedByProfile || isConnectedByAudioAddress || isConnectedByAudioName ||
+                                (isReflectConnected && isAudioActive && (isConnectedByAcl || isConnectedByAudioName))
+
+                        if (!isConn) {
+                            aclConnectedAddresses.remove(devAddr)
+                            return@forEach
+                        }
+
+                        if (isConn) {
+                            com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(
+                                context, devAddr, System.currentTimeMillis()
                             )
-                        )
+                            val dbDevice = allDbDevices[devAddr]
+                            val inferred = inferDeviceType(device)
+                            // If DB previously auto-saved EARBUDS by default, but new detection identifies NECKBAND, auto-correct it
+                            val devType = if (dbDevice == null) {
+                                inferred
+                            } else if (dbDevice.deviceType == DeviceType.EARBUDS && inferred == DeviceType.NECKBAND) {
+                                scope.launch { db.deviceDao().setDeviceType(devAddr, DeviceType.NECKBAND) }
+                                DeviceType.NECKBAND
+                            } else if (dbDevice.deviceType == DeviceType.OTHER && inferred != DeviceType.OTHER) {
+                                scope.launch { db.deviceDao().setDeviceType(devAddr, inferred) }
+                                inferred
+                            } else {
+                                dbDevice.deviceType
+                            }
+                            val batteryInfo = readBatteryInfo(device)
+                            connected.add(
+                                ConnectedDevice(
+                                    address = devAddr,
+                                    name = if (devName.isNotBlank()) devName else devAddr,
+                                    isFavorite = dbDevice?.isFavorite ?: false,
+                                    type = devType,
+                                    device = device,
+                                    battery = batteryInfo
+                                )
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        _connectedDevices.value = connected.distinctBy { it.address }
+            _connectedDevices.value = connected.distinctBy { it.address }
+        } finally {
+            refreshMutex.unlock()
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -616,12 +623,17 @@ class BluetoothMonitor(
             // case remains -1 so UI accurately displays "--".
         }
 
-        // 6. Persist confirmed levels to SharedPreferences (main, left, right only)
-        prefs.edit().apply {
-            if (main in 0..100) putInt("main_${device.address}", main)
-            if (left in 0..100) putInt("left_${device.address}", left)
-            if (right in 0..100) putInt("right_${device.address}", right)
-        }.apply()
+        // 6. Persist confirmed levels to SharedPreferences only when values actually change
+        val oldMain = prefs.getInt("main_${device.address}", -1)
+        val oldLeft = prefs.getInt("left_${device.address}", -1)
+        val oldRight = prefs.getInt("right_${device.address}", -1)
+        if (main != oldMain || left != oldLeft || right != oldRight) {
+            val editor = prefs.edit()
+            if (main in 0..100) editor.putInt("main_${device.address}", main)
+            if (left in 0..100) editor.putInt("left_${device.address}", left)
+            if (right in 0..100) editor.putInt("right_${device.address}", right)
+            editor.apply()
+        }
 
         val devName = try { device.name ?: "" } catch (_: SecurityException) { "" }
         val support = getCaseSupport(device, devName)

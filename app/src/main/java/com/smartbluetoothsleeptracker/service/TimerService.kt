@@ -83,6 +83,7 @@ class TimerService : Service() {
     private var sessionStartTime = 0L
     private var warningFired = false
     private var cachedSettings: AppSettings = AppSettings()
+    private var warningVolumeReceiver: android.content.BroadcastReceiver? = null
 
     private val app get() = application as SleepBTApp
     private var shakeDetector: ShakeDetector? = null
@@ -468,9 +469,17 @@ class TimerService : Service() {
                     connectedAddrs.isNotEmpty()
                 }
 
+                val hasWiredTarget = targetAddresses.contains(com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.WIRED_ADDRESS)
+                val isWiredConnected = com.smartbluetoothsleeptracker.receiver.WiredHeadsetReceiver.isWiredConnected(this@TimerService)
                 val isBtEnabled = getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled ?: false
 
-                if (!isBtEnabled || !isAnyTargetConnected) {
+                val isTargetDisconnected = when {
+                    hasWiredTarget -> !isWiredConnected
+                    targetAddresses.isNotEmpty() -> !isBtEnabled || !isAnyTargetConnected
+                    else -> false // phone speaker mode
+                }
+
+                if (isTargetDisconnected) {
                     consecutiveDisconnectedSeconds++
                     if (consecutiveDisconnectedSeconds >= 5) {
                         Log.i(TAG, "Device manually disconnected for 5s (or BT turned off). Finishing session cleanly.")
@@ -508,10 +517,11 @@ class TimerService : Service() {
                         warningFired = true
                         justFiredWarning = true
                         shakeDetector?.startListening()
+                        startWarningVolumeListener()
                         val leadStr = TimerCalculations.formatRemainingLeadText(remaining)
                         nm.notify(
                             AppNotifications.NOTIF_TIMER,
-                            buildTimerNotification(warningText = "Disconnecting in $leadStr • Press volume key to extend")
+                            buildTimerNotification(warningText = "$leadStr remaining • Press volume key to extend")
                         )
                         HapticManager.vibrateWarning(this@TimerService)
                     }
@@ -522,7 +532,7 @@ class TimerService : Service() {
                 if (justFiredWarning || (tickCount % 5 == 0)) {
                     val warnText = if (warningFired) {
                         val leadStr = TimerCalculations.formatRemainingLeadText(remaining)
-                        "Disconnecting in $leadStr • Press volume key to extend"
+                        "$leadStr remaining • Press volume key to extend"
                     } else null
                     nm.notify(
                         AppNotifications.NOTIF_TIMER,
@@ -550,6 +560,8 @@ class TimerService : Service() {
         }
         isExpiring = true
         Log.i(TAG, "Timer expired — executing expiry sequence (fromUserEndNow=$fromUserEndNow)")
+        stopWarningVolumeListener()
+        shakeDetector?.stopListening()
         cancelExpiryAlarm()
         tickJob?.cancel()
 
@@ -561,14 +573,15 @@ class TimerService : Service() {
                 val nm = getSystemService(android.app.NotificationManager::class.java)
                 nm.cancel(AppNotifications.NOTIF_TIMER)
 
-                // ── Safety Guard: Active Call Protection ──────────────────────
+                // ── Safety Guard: Active Call Protection (Telephony & VoIP e.g. WhatsApp/Meet) ─
                 val am = getSystemService(android.media.AudioManager::class.java)
                 val isCallActive = am != null && (
                     am.mode == android.media.AudioManager.MODE_IN_CALL ||
+                    am.mode == android.media.AudioManager.MODE_IN_COMMUNICATION ||
                     am.mode == android.media.AudioManager.MODE_RINGTONE
                 )
                 if (isCallActive && !fromUserEndNow) {
-                    Log.i(TAG, "Active phone call or ringtone in progress (mode=${am?.mode}) — auto-extending timer by ${settings.extendMinutes}m to prevent call disconnect")
+                    Log.i(TAG, "Active phone call, VoIP call, or ringtone in progress (mode=${am?.mode}) — auto-extending timer by ${settings.extendMinutes}m to prevent call disconnect")
                     isExpiring = false
                     performExtend()
                     return@launch
@@ -612,10 +625,12 @@ class TimerService : Service() {
                         btDevices.add(dev)
                     }
                 }
-                // 2. Currently connected devices in btMonitor
-                app.btMonitor.connectedDevices.value.mapNotNull { it.device }.forEach { dev ->
-                    if (!btDevices.any { it.address.equals(dev.address, ignoreCase = true) }) {
-                        btDevices.add(dev)
+                // 2. Currently connected devices in btMonitor (fallback ONLY if no target devices resolved, preventing smartwatch disconnect)
+                if (btDevices.isEmpty()) {
+                    app.btMonitor.connectedDevices.value.mapNotNull { it.device }.forEach { dev ->
+                        if (!btDevices.any { it.address.equals(dev.address, ignoreCase = true) }) {
+                            btDevices.add(dev)
+                        }
                     }
                 }
                 // 3. Fallback to adapter connected audio devices
@@ -788,6 +803,7 @@ class TimerService : Service() {
         nm.cancel(AppNotifications.NOTIF_TIMER)
         nm.cancel(AppNotifications.NOTIF_WARNING)
         shakeDetector?.stopListening()
+        stopWarningVolumeListener()
 
         // Restore volume and abandon audio focus if timer was fading or cancelled
         app.playbackController.restoreVolume()
@@ -810,10 +826,18 @@ class TimerService : Service() {
         autoResumeJob?.cancel()
         cooldownTickJob?.cancel()
         shakeDetector?.stopListening()
+        stopWarningVolumeListener()
+
+        // Ensure playback pauses so media doesn't leak out of phone speaker
+        app.playbackController.stealAudioFocusAndPause()
 
         val nm = getSystemService(android.app.NotificationManager::class.java)
         nm.cancel(AppNotifications.NOTIF_TIMER)
         nm.cancel(AppNotifications.NOTIF_WARNING)
+
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(applicationContext, "Earbuds disconnected • Sleep timer finished", Toast.LENGTH_SHORT).show()
+        }
 
         scope.launch {
             if (sessionId > 0L) {
@@ -834,7 +858,7 @@ class TimerService : Service() {
                             endTime = now,
                             plannedDurationMin = plannedMinutes,
                             actualDurationMin = actualMin,
-                            audioStopped = false,
+                            audioStopped = true,
                             disconnectConfirmed = true,
                             extendedMinutes = extendedMinutes,
                             date = today
@@ -866,6 +890,13 @@ class TimerService : Service() {
 
     private suspend fun performExtend() {
         shakeDetector?.stopListening()
+        stopWarningVolumeListener()
+
+        if (!TimerCalculations.canAutoExtend(extendedMinutes)) {
+            Log.w(TAG, "Maximum auto-extend reached (${extendedMinutes}m) — extend request ignored")
+            return
+        }
+
         val settings = cachedSettings
         val addMs = settings.extendMinutes * 60_000L
         endTimeMillis += addMs
@@ -901,6 +932,41 @@ class TimerService : Service() {
         nm.cancel(AppNotifications.NOTIF_WARNING)
 
         Log.i(TAG, "Extended by ${settings.extendMinutes}m (total extended: ${extendedMinutes}m)")
+    }
+
+    private fun startWarningVolumeListener() {
+        if (warningVolumeReceiver != null) return
+        val am = getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+        val initialVol = am?.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) ?: -1
+        warningVolumeReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                if (intent.action == "android.media.VOLUME_CHANGED_ACTION") {
+                    val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
+                    if (streamType == android.media.AudioManager.STREAM_MUSIC) {
+                        val newVol = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
+                        if (newVol != -1 && newVol != initialVol) {
+                            Log.i(TAG, "Volume key pressed during warning period ($initialVol -> $newVol) — extending timer")
+                            stopWarningVolumeListener()
+                            extendTimer()
+                        }
+                    }
+                }
+            }
+        }
+        val filter = android.content.IntentFilter("android.media.VOLUME_CHANGED_ACTION")
+        androidx.core.content.ContextCompat.registerReceiver(
+            this,
+            warningVolumeReceiver,
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+        )
+    }
+
+    private fun stopWarningVolumeListener() {
+        warningVolumeReceiver?.let {
+            runCatching { unregisterReceiver(it) }
+            warningVolumeReceiver = null
+        }
     }
 
     private fun endNow() {
@@ -1067,6 +1133,7 @@ class TimerService : Service() {
         autoResumeJob?.cancel()
         shakeDetector?.stopListening()
         shakeDetector = null
+        stopWarningVolumeListener()
         app.disconnector.endCooldown()
         releaseWakeLock()
         app.updateTimerState(ActiveTimerState())

@@ -135,6 +135,10 @@ class PlaybackController(private val context: Context) {
     fun restoreVolume() {
         if (priorVolume > 0) {
             try {
+                // If media is somehow still actively outputting sound, enforce pause first
+                if (audioManager.isMusicActive) {
+                    stealAudioFocusAndPause()
+                }
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, priorVolume, 0)
                 Log.i(TAG, "Restored STREAM_MUSIC volume to $priorVolume after disconnect sequence")
             } catch (e: Exception) {
@@ -206,6 +210,7 @@ class PlaybackController(private val context: Context) {
                     val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
                     if (streamType == AudioManager.STREAM_MUSIC) {
                         val newVol = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
+                        val prevVol = intent.getIntExtra("android.media.EXTRA_PREV_VOLUME_STREAM_VALUE", -1)
                         val currentVol = if (newVol != -1) newVol else audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
 
                         val now = System.currentTimeMillis()
@@ -216,25 +221,24 @@ class PlaybackController(private val context: Context) {
                             return
                         }
 
-                        // Clean up old entries (older than 2 seconds)
-                        internalVolumeChanges.removeAll { now - it.second > 2000L }
-
-                        // 2. If volume actually increased, the user pressed Volume Up to stay awake!
-                        if (lastProgrammaticVolume in 0..100 && currentVol > lastProgrammaticVolume) {
+                        // 2. If volume increased (newVol > prevVol or currentVol > lastProgrammaticVolume),
+                        // this is DEFINITIVELY the user pressing Volume Up to stay awake! Programmatic fade only decreases volume.
+                        if ((prevVol != -1 && currentVol > prevVol) || (lastProgrammaticVolume in 0..100 && currentVol > lastProgrammaticVolume)) {
                             Log.i(TAG, "Volume increased ($lastProgrammaticVolume -> $currentVol) from user key press! Cancelling fade.")
                             userCancelled = true
                             return
                         }
 
-                        // 3. If volume change matches our programmatic step or occurs during active fade step (< 450ms)
+                        // 3. Check if volume change matches an internally requested programmatic fade step
                         val isInternal = internalVolumeChanges.any { it.first == currentVol }
-                        if (isInternal || (now - lastProgrammaticChangeTime < 450L && currentVol <= lastProgrammaticVolume)) {
+                        if (isInternal || (now - lastProgrammaticChangeTime < 600L && currentVol <= lastProgrammaticVolume)) {
                             Log.d(TAG, "Volume change event ($currentVol) matched programmatic fade step — ignoring")
                             return
                         }
 
-                        // 4. Volume changed when no programmatic step was underway (> 450ms ago): external key press
-                        if (now - lastProgrammaticChangeTime >= 450L && currentVol != lastProgrammaticVolume) {
+                        // 4. Volume dropped significantly or changed unexpectedly outside our fade step:
+                        // User deliberately adjusted volume with physical keys
+                        if (now - lastProgrammaticChangeTime >= 600L && currentVol != lastProgrammaticVolume) {
                             Log.i(TAG, "Volume change ($currentVol) detected from EXTERNAL USER KEY PRESS! Cancelling fade.")
                             userCancelled = true
                         }
@@ -247,9 +251,9 @@ class PlaybackController(private val context: Context) {
             context,
             volumeReceiver,
             filter,
-            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
         )
-        Log.i(TAG, "Registered VOLUME_CHANGED_ACTION receiver for fade window")
+        Log.i(TAG, "Registered VOLUME_CHANGED_ACTION receiver for fade window with RECEIVER_EXPORTED")
     }
 
     private fun unregisterVolumeReceiver() {
