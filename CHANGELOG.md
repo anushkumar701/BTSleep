@@ -7,6 +7,13 @@ All notable changes to **SleepBT** are documented in this file.
 ### Summary
 Version release 1.0.2 featuring a clean adaptive earbud battery display (removing the Case column and disclaimers whenever case status cannot be fetched), and a comprehensive 6-step interactive in-app tutorial explaining Volume Fade, Reconnect Blocker, Usage, Hearing Health, and Settings.
 
+### 🔋 Fast Pair Earbuds & Case Battery Sync
+- **Fast Pair Notification Listener**: Implemented `FastPairNotificationListener` (via `NotificationListenerService`) to automatically read earbuds and case battery percentages from Google Play Services (`BATTERY_NOTIFICATION_CHANNEL`) and companion apps (realme Link, OnePlus HeyMelody, Pixel Buds, Galaxy Wearable, etc.).
+- **Smart Adaptive Parser**: `FastPairNotificationParser` parses Left, Right, Case, and charging states (`Left 100% Case 80% Right 100%`) with name matching to active Bluetooth audio devices.
+- **Zero-Compromise Privacy Guarantee**: Strictly filters for battery notifications; all messages, emails, chats, and banking notifications are immediately discarded without inspection, logging, or storage.
+- **Persistent Telemetry & Instant Cold-Start Query**: Automatically syncs active notifications on startup and saves confirmed battery levels to SharedPreferences so Case and Earbuds levels display instantly.
+- **One-Tap Permission Setup**: If notification access is not yet granted, an unobtrusive helper chip in `HomeScreen` and a dedicated row in `SettingsScreen` guides the user with a single tap to the system settings toggle.
+
 ### 🔋 Clean Adaptive Battery Display
 - **Case Column Removed When Unavailable**: In `HomeScreen.kt`, if case battery telemetry is unsupported or unavailable on the connected earbuds (`caseLevel !in 0..100`), the Case column and dividers are cleanly omitted. The card renders Left and Right cleanly without dead `--` placeholders or disclaimers. Case is only rendered when telemetry is verified.
 

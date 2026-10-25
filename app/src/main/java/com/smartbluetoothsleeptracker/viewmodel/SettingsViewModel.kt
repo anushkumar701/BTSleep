@@ -110,6 +110,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             settingsAction = Settings.ACTION_SECURITY_SETTINGS
         ))
 
+        // 5. Earbuds Battery Sync (Fast Pair Notification Access)
+        list.add(PermissionStatus(
+            name = "Earbuds Case Battery Sync",
+            description = "Reads earbuds & case battery via Fast Pair notifications",
+            granted = com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.isAccessGranted(ctx),
+            settingsAction = Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+        ))
+
         return list
     }
 

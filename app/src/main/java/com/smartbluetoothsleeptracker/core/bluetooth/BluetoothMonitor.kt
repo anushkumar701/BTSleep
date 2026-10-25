@@ -82,7 +82,8 @@ class BluetoothMonitor(
         val devName = name.ifBlank {
             try { device.name ?: "" } catch (_: SecurityException) { "" }
         }
-        return if (caseProviders.any { it.supports(device, devName) }) {
+        val cachedCase = deviceBatteryCache[device.address]?.caseLevel ?: -1
+        return if (cachedCase in 0..100 || caseBatteryCache.containsKey(device.address) || caseProviders.any { it.supports(device, devName) }) {
             CaseSupport.Supported
         } else {
             CaseSupport.Unsupported
@@ -96,6 +97,79 @@ class BluetoothMonitor(
             caseLevel = caseBattery.percent,
             caseBattery = caseBattery
         )
+        scope.launch { refreshConnectedDevices() }
+    }
+
+    fun updateFromNotification(
+        deviceName: String?,
+        left: Int = -1,
+        right: Int = -1,
+        case: Int = -1,
+        main: Int = -1,
+        isCaseCharging: Boolean? = null
+    ) {
+        val currentConnected = _connectedDevices.value
+        if (currentConnected.isEmpty()) return
+
+        val target: ConnectedDevice = (if (!deviceName.isNullOrBlank()) {
+            currentConnected.firstOrNull { dev ->
+                FastPairNotificationParser.matchesDevice(deviceName, dev.name)
+            } ?: if (currentConnected.size == 1 && currentConnected[0].type == DeviceType.EARBUDS) {
+                currentConnected[0]
+            } else null
+        } else if (currentConnected.size == 1) {
+            currentConnected[0]
+        } else {
+            currentConnected.firstOrNull { it.type == DeviceType.EARBUDS }
+        }) ?: return
+
+        val addr = target.address
+        val existing = deviceBatteryCache[addr] ?: target.battery ?: BatteryInfo()
+
+        val finalLeft = if (left in 0..100) left else existing.leftLevel
+        val finalRight = if (right in 0..100) right else existing.rightLevel
+        val finalCase = if (case in 0..100) case else existing.caseLevel
+
+        val finalMain = when {
+            main in 0..100 -> main
+            finalLeft in 0..100 && finalRight in 0..100 -> (finalLeft + finalRight) / 2
+            finalLeft in 0..100 -> finalLeft
+            finalRight in 0..100 -> finalRight
+            existing.mainLevel in 0..100 -> existing.mainLevel
+            else -> -1
+        }
+
+        val caseBat = if (finalCase in 0..100) {
+            CaseBattery(
+                percent = finalCase,
+                charging = isCaseCharging ?: existing.caseBattery?.charging,
+                seenAtMillis = System.currentTimeMillis()
+            )
+        } else existing.caseBattery
+
+        if (caseBat != null) {
+            caseBatteryCache[addr] = caseBat
+        }
+
+        val updated = BatteryInfo(
+            mainLevel = finalMain,
+            leftLevel = finalLeft,
+            rightLevel = finalRight,
+            caseLevel = finalCase,
+            caseBattery = caseBat,
+            caseSupport = if (finalCase in 0..100) CaseSupport.Supported else existing.caseSupport
+        )
+
+        deviceBatteryCache[addr] = updated
+
+        val prefs = context.getSharedPreferences("device_battery_prefs", Context.MODE_PRIVATE).edit()
+        if (finalMain in 0..100) prefs.putInt("main_$addr", finalMain)
+        if (finalLeft in 0..100) prefs.putInt("left_$addr", finalLeft)
+        if (finalRight in 0..100) prefs.putInt("right_$addr", finalRight)
+        if (finalCase in 0..100) prefs.putInt("case_$addr", finalCase)
+        prefs.apply()
+
+        Log.i(TAG, "Battery updated from notification for ${target.name} ($addr): L=$finalLeft%, R=$finalRight%, Case=$finalCase%")
         scope.launch { refreshConnectedDevices() }
     }
 
@@ -602,6 +676,10 @@ class BluetoothMonitor(
             val p = prefs.getInt("right_${device.address}", -1)
             if (p in 0..100) right = p
         }
+        if (case == -1) {
+            val p = prefs.getInt("case_${device.address}", -1)
+            if (p in 0..100) case = p
+        }
 
         // 5. Harmonize Left and Right for TWS Earbuds
         if (isEarbuds) {
@@ -627,17 +705,21 @@ class BluetoothMonitor(
         val oldMain = prefs.getInt("main_${device.address}", -1)
         val oldLeft = prefs.getInt("left_${device.address}", -1)
         val oldRight = prefs.getInt("right_${device.address}", -1)
-        if (main != oldMain || left != oldLeft || right != oldRight) {
+        val oldCase = prefs.getInt("case_${device.address}", -1)
+        if (main != oldMain || left != oldLeft || right != oldRight || case != oldCase) {
             val editor = prefs.edit()
             if (main in 0..100) editor.putInt("main_${device.address}", main)
             if (left in 0..100) editor.putInt("left_${device.address}", left)
             if (right in 0..100) editor.putInt("right_${device.address}", right)
+            if (case in 0..100) editor.putInt("case_${device.address}", case)
             editor.apply()
         }
 
         val devName = try { device.name ?: "" } catch (_: SecurityException) { "" }
         val support = getCaseSupport(device, devName)
-        val caseBat = caseBatteryCache[device.address]
+        val caseBat = caseBatteryCache[device.address] ?: if (case in 0..100) {
+            CaseBattery(percent = case, charging = null, seenAtMillis = System.currentTimeMillis())
+        } else null
         if (case == -1 && caseBat != null && caseBat.percent in 0..100) {
             case = caseBat.percent
         }
@@ -648,7 +730,7 @@ class BluetoothMonitor(
             rightLevel = right,
             caseLevel = case,
             caseBattery = caseBat,
-            caseSupport = support
+            caseSupport = if (case in 0..100) CaseSupport.Supported else support
         )
         deviceBatteryCache[device.address] = info
         return info

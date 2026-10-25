@@ -1728,9 +1728,11 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
     // Poll case battery while Home screen is visible and an earbuds device is connected
     LaunchedEffect(activeDevice.address, hasScanPermission) {
         val dev = activeDevice.device ?: return@LaunchedEffect
+        com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.instance?.get()?.syncActiveNotifications()
         if (isEarbuds) {
             while (isActive) {
                 app?.btMonitor?.queryCaseBattery(dev, activeDevice.name)
+                com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.instance?.get()?.syncActiveNotifications()
                 delay(60_000L)
             }
         }
@@ -1790,6 +1792,10 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
 
                 Spacer(Modifier.height(12.dp))
 
+                val caseBat = battery.caseBattery
+                val caseLvl = if (battery.caseLevel in 0..100) battery.caseLevel else -1
+                val isCaseKnown = caseLvl in 0..100
+
                 // Left, Right, Case battery cells
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1808,9 +1814,6 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
                         battery.leftLevel in 0..100 -> battery.leftLevel
                         else -> -1
                     }
-                    val caseBat = battery.caseBattery
-                    val caseLvl = if (battery.caseLevel in 0..100) battery.caseLevel else -1
-                    val isCaseKnown = caseLvl in 0..100
                     val now = System.currentTimeMillis()
                     val isStale = isCaseKnown && caseBat != null && (now - caseBat.seenAtMillis > 5 * 60 * 1000L)
                     val caseSubtext = when {
@@ -1852,6 +1855,37 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
                             icon = Icons.Rounded.Inbox,
                             isCharging = caseBat?.charging,
                             subtext = caseSubtext
+                        )
+                    }
+                }
+
+                if (!isCaseKnown && !com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.isAccessGranted(context)) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Surface3.copy(alpha = 0.5f))
+                            .clickable {
+                                com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.openNotificationAccessSettings(context)
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Sync,
+                            contentDescription = null,
+                            tint = AccentBlue,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Tap to enable Fast Pair sync for Case battery",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 11.sp,
+                            color = AccentBlue,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
