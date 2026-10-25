@@ -16,6 +16,7 @@ Human-perspective real-world test case audit and hardening across bedtime fallin
 - **Safe Volume Restoration**: In `restoreVolume()`, forces audio pause prior to restoring media volume, preventing sudden audio blasts on the phone speaker.
 - **Interactive Primary Sleep Target on Home Screen**: Tapping the star badge on `ConnectionStatusBar` now directly toggles the Primary Sleep Target device with instantaneous UI feedback and DB upsert fallback for newly paired devices.
 - **Sleek Minimalist Notifications**: Eliminated redundant "Disconnecting" titles; streamlined status to `Ending Soon • [Device]` with clear remaining time badge (`Ending Soon • 85%`) and one-tap extension actions.
+- **Startup Crash Fix**: Initialized `disconnector = BluetoothDisconnector(this, db)` in `SleepBTApp.onCreate()`, fixing `UninitializedPropertyAccessException` when `HomeViewModel` and broadcast receivers collect `cooldownState`.
 - **Zero-Lag Concurrent App Refresh**: Added `refreshMutex` with `tryLock()` guard and single-query batch DB caching in `BluetoothMonitor`, eliminating UI stutter and queued refresh storms.
 
 ## [1.0.4] - 2026-10-14
