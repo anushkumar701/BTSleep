@@ -1,0 +1,22 @@
+SleepBT is an offline-first, privacy-focused Android sleep timer and ear health protector designed to gracefully fade audio, disconnect Bluetooth devices, and secure your phone while you fall asleep.
+
+Many people fall asleep listening to audiobooks, podcasts, white noise, or music. Leaving headphones playing all night causes hearing fatigue according to WHO standards, drains device batteries, and risks blaring sound through phone speakers if earbuds run out of power. SleepBT prevents this by managing a clean, gentle sleep shutdown routine.
+
+Key Features:
+• Precision Rotary Dial & Quick Presets: Set timers from 1 to 120 minutes with a responsive circular dial and haptic feedback, or jump to 15m, 30m, 45m, and 60m presets with a single tap.
+• Smooth Exponential Volume Fade: Configurable 3s to 30s smooth volume fade prevents abrupt silence that can wake you up.
+• Universal Media Control: Sends universal media pauses compatible with Spotify, YouTube Music, Apple Music, Audible, Pocket Casts, and more.
+• Multi-Protocol Bluetooth Teardown: Systematically unbinds devices across A2DP (Media Audio), HFP/HSP (Call Audio), LE Audio, and ACL link layers.
+• Post-Timer Reconnect Blocker: Prevents earbuds from immediately reconnecting and waking you if bumped in your sleep.
+• Active Audio Auto-Extend: Automatically extends countdown if active media listening is detected when the timer expires.
+• Lock Screen & Notification Controls: Adjust, extend, or end timers directly from the ongoing status notification.
+• Shake-to-Extend: Gentle accelerometer motion detection allows extending the timer with a sleepy nudge during warning windows.
+• Quick Settings Tile: Toggle sleep timers straight from your Android quick settings shade.
+• Optional Screen Lock: Securely locks phone display upon expiry via Device Admin API.
+• Ear Health & Session History: Tracks connected headphone duration, daily exposure against WHO sound limits, and ear fatigue bands.
+• Discrete Earbuds Battery Telemetry: Direct hardware battery reading for active Left and Right earbuds.
+
+Privacy & Freedom:
+• 100% Free and Open Source (MIT License)
+• Completely offline-first: no user accounts, no analytics, no ads, and no cloud tracking
+• Zero notification scraping: uses direct native Bluetooth APIs

@@ -1,0 +1,43 @@
+Categories:
+  - Multimedia
+  - System
+License: MIT
+AuthorName: Midnight Compiler
+SourceCode: https://github.com/anushkumar701/BTSleep
+IssueTracker: https://github.com/anushkumar701/BTSleep/issues
+Changelog: https://github.com/anushkumar701/BTSleep/blob/main/CHANGELOG.md
+
+AutoName: SleepBT
+Summary: Smart Bluetooth sleep timer, smooth audio fade-out & ear health utility
+Description: |-
+  SleepBT is an offline-first, privacy-focused Android sleep timer and ear
+  health protector designed to gracefully fade audio, disconnect Bluetooth
+  devices, and secure your phone while you fall asleep.
+
+  Key Features:
+  * Precision Rotary Dial & Quick Presets (15m, 30m, 45m, 60m)
+  * Smooth Exponential Volume Fade (3s to 30s)
+  * Universal Media Player Support (Spotify, YouTube Music, Audible, Podcasts)
+  * Multi-Protocol Bluetooth Teardown (A2DP, HFP/HSP, LE Audio, ACL)
+  * Post-Timer Reconnect Blocker window to prevent accidental wakeups
+  * Active Audio Auto-Extend and Shake-to-Extend nudge detection
+  * Lock Screen and Notification timer controls
+  * Quick Settings Tile for one-tap timer activation
+  * WHO sound exposure monitoring & ear health session history
+  * Discrete Left and Right earbud battery telemetry
+
+RepoType: git
+Repo: https://github.com/anushkumar701/BTSleep.git
+
+Builds:
+  - versionName: 1.0.2
+    versionCode: 4
+    commit: 1.0.2
+    subdir: app
+    gradle:
+      - yes
+
+AutoUpdateMode: Version %v
+UpdateCheckMode: Tags
+CurrentVersion: 1.0.2
+CurrentVersionCode: 4

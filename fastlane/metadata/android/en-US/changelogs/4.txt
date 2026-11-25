@@ -1,0 +1,7 @@
+Version 1.0.2:
+• 60/120fps Smooth UI: RenderThread transformations and eliminated rotary dial invalidation loops
+• Privacy-first direct Bluetooth telemetry: Left and Right earbud battery levels without notification scraping
+• Adaptive battery display: Automatically hides case column when unsupported by hardware
+• Fixed negative chronometer countdown (-0.12) in notification shade
+• Usage tab pull-to-refresh fix and self-healing session aggregation
+• Comprehensive 6-step interactive tutorial for presets, fade, and reconnect blocker
