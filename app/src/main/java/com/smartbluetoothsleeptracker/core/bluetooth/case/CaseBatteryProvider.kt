@@ -5,7 +5,7 @@ import android.bluetooth.BluetoothDevice
 data class CaseBattery(
     val percent: Int,
     val charging: Boolean?,
-    val seenAtMillis: Long
+    val seenAtMillis: Long = System.currentTimeMillis()
 )
 
 sealed interface CaseSupport {

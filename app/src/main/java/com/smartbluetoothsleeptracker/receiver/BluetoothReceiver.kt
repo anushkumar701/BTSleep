@@ -26,22 +26,35 @@ class BluetoothReceiver : BroadcastReceiver() {
         private const val TAG = "BtReceiver"
         private const val PREFS_NAME = "bt_connection_tracker"
         private const val KEY_PREFIX_START = "start_time_"
+        private const val MAX_VALID_CONNECTION_MS = 12 * 60 * 60_000L // 12 hours max
 
         fun getActiveConnectTime(context: Context, address: String): Long {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return prefs.getLong("$KEY_PREFIX_START$address", 0L)
+            val time = prefs.getLong("$KEY_PREFIX_START$address", 0L)
+            val now = System.currentTimeMillis()
+            // If timestamp is missing, in the future, or exceeds 12 hours, purge and return 0
+            if (time <= 0L || time > now || (now - time) > MAX_VALID_CONNECTION_MS) {
+                if (time != 0L) {
+                    prefs.edit().remove("$KEY_PREFIX_START$address").apply()
+                }
+                return 0L
+            }
+            return time
         }
 
         fun setActiveConnectTime(context: Context, address: String, timestamp: Long) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            if (!prefs.contains("$KEY_PREFIX_START$address")) {
-                prefs.edit().putLong("$KEY_PREFIX_START$address", timestamp).apply()
-            }
+            prefs.edit().putLong("$KEY_PREFIX_START$address", timestamp).apply()
         }
 
         fun clearActiveConnectTime(context: Context, address: String) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().remove("$KEY_PREFIX_START$address").apply()
+        }
+
+        fun clearAllActiveConnectTimes(context: Context) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().clear().apply()
         }
     }
 
@@ -81,10 +94,8 @@ class BluetoothReceiver : BroadcastReceiver() {
                     return
                 }
 
-                // Record connection start timestamp in persistent SharedPreferences
-                if (!prefs.contains("$KEY_PREFIX_START$address")) {
-                    prefs.edit().putLong("$KEY_PREFIX_START$address", now).apply()
-                }
+                // Record fresh connection start timestamp
+                prefs.edit().putLong("$KEY_PREFIX_START$address", now).apply()
 
                 val pendingResult = goAsync()
                 CoroutineScope(Dispatchers.IO).launch {
@@ -120,25 +131,26 @@ class BluetoothReceiver : BroadcastReceiver() {
                 val now = System.currentTimeMillis()
 
                 Log.i(TAG, "ACL_DISCONNECTED: ${device.name ?: address}")
+                app.btMonitor.dismissBatteryNotification(address)
                 app.btMonitor.refresh()
 
                 val startTime = prefs.getLong("$KEY_PREFIX_START$address", 0L)
                 prefs.edit().remove("$KEY_PREFIX_START$address").apply()
 
-                if (startTime > 0L && now > startTime) {
+                if (startTime > 0L && now > startTime && (now - startTime) < MAX_VALID_CONNECTION_MS) {
                     val durationMs = now - startTime
                     val minutes = com.smartbluetoothsleeptracker.service.TimerCalculations.calculateDurationMinutes(durationMs)
 
-                    // Record session and daily usage for background connections lasting >= 1 minute
-                    if (minutes >= 1) {
+                    // Record session and daily usage for background connections between 1 min and 12 hours
+                    if (minutes in 1..720) {
                         val today = LocalDate.now().toString()
                         val pendingResult = goAsync()
                         CoroutineScope(Dispatchers.IO).launch {
                             try {
-                                // Skip if TimerService is actively running for this device
-                                val activeSession = app.db.sessionDao().getRecentSessionForDevice(address, now - 60_000L)
-                                if (activeSession != null && activeSession.endTime == null) {
-                                    Log.i(TAG, "Skipping background session insertion — timer is actively running")
+                                // Skip if TimerService is actively running or recently ended a session for this device
+                                val recentSession = app.db.sessionDao().getRecentSessionForDevice(address, now - 120_000L)
+                                if (recentSession != null) {
+                                    Log.i(TAG, "Skipping background session insertion — active or recent timer session exists")
                                     return@launch
                                 }
 
@@ -171,43 +183,56 @@ class BluetoothReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             BluetoothAdapter.ACTION_STATE_CHANGED -> {
                 val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return
-                if (adapter.isEnabled) {
-                    val now = System.currentTimeMillis()
-                    val pendingResult = goAsync()
-                    CoroutineScope(Dispatchers.IO).launch {
-                        try {
-                            val a2dpDevices = getProfileDevices(context, adapter, android.bluetooth.BluetoothProfile.A2DP)
-                            val headsetDevices = getProfileDevices(context, adapter, android.bluetooth.BluetoothProfile.HEADSET)
-                            val profileConnected = (a2dpDevices + headsetDevices).map { it.address }.toSet()
+                if (!adapter.isEnabled) {
+                    clearAllActiveConnectTimes(context)
+                    app.btMonitor.dismissAllBatteryNotifications()
+                    return
+                }
 
-                            adapter.bondedDevices?.forEach { dev ->
-                                val isConn = profileConnected.contains(dev.address)
+                val now = System.currentTimeMillis()
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val a2dpDevices = getProfileDevices(context, adapter, android.bluetooth.BluetoothProfile.A2DP)
+                        val headsetDevices = getProfileDevices(context, adapter, android.bluetooth.BluetoothProfile.HEADSET)
+                        val profileConnected = (a2dpDevices + headsetDevices).map { it.address }.toSet()
 
-                                if (isConn) {
-                                    if (!prefs.contains("$KEY_PREFIX_START${dev.address}")) {
-                                        prefs.edit().putLong("$KEY_PREFIX_START${dev.address}", now).apply()
-                                    }
-                                    val devType = inferDeviceType(dev)
-                                    val existing = app.db.deviceDao().getDevice(dev.address)
-                                    if (existing == null) {
-                                        app.db.deviceDao().upsert(
-                                            DeviceEntity(
-                                                address = dev.address,
-                                                name = dev.name ?: dev.address,
-                                                deviceType = devType,
-                                                lastConnectedAt = now
-                                            )
+                        // Clean up stale timestamps for devices that are not connected
+                        val allKeys = prefs.all.keys.filter { it.startsWith(KEY_PREFIX_START) }
+                        allKeys.forEach { key ->
+                            val addr = key.removePrefix(KEY_PREFIX_START)
+                            if (addr !in profileConnected) {
+                                prefs.edit().remove(key).apply()
+                            }
+                        }
+
+                        adapter.bondedDevices?.forEach { dev ->
+                            val isConn = profileConnected.contains(dev.address)
+
+                            if (isConn) {
+                                if (!prefs.contains("$KEY_PREFIX_START${dev.address}")) {
+                                    prefs.edit().putLong("$KEY_PREFIX_START${dev.address}", now).apply()
+                                }
+                                val devType = inferDeviceType(dev)
+                                val existing = app.db.deviceDao().getDevice(dev.address)
+                                if (existing == null) {
+                                    app.db.deviceDao().upsert(
+                                        DeviceEntity(
+                                            address = dev.address,
+                                            name = dev.name ?: dev.address,
+                                            deviceType = devType,
+                                            lastConnectedAt = now
                                         )
-                                    } else {
-                                        app.db.deviceDao().updateLastConnected(dev.address, now)
-                                    }
+                                    )
+                                } else {
+                                    app.db.deviceDao().updateLastConnected(dev.address, now)
                                 }
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error syncing connected devices on boot/state change: ${e.message}")
-                        } finally {
-                            pendingResult.finish()
                         }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error syncing connected devices on boot/state change: ${e.message}")
+                    } finally {
+                        pendingResult.finish()
                     }
                 }
             }

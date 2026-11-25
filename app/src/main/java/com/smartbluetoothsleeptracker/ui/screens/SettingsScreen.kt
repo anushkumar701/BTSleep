@@ -184,6 +184,15 @@ fun SettingsScreen(
         item { Spacer(Modifier.height(8.dp)); SectionHeader("Notifications") }
         item {
             SettingToggle(
+                icon = Icons.Rounded.BatteryChargingFull,
+                title = "Connection Battery Alert",
+                subtitle = "Show notification with battery percentage when audio device connects",
+                checked = s.connectBatteryNotificationEnabled,
+                onCheckedChange = { viewModel.setConnectBatteryNotification(it) }
+            )
+        }
+        item {
+            SettingToggle(
                 icon = Icons.Rounded.Notifications,
                 title = "Sleep Alerts",
                 subtitle = "Notify before timer ends",

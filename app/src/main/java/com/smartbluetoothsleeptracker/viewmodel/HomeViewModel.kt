@@ -114,7 +114,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // Observe connected devices & compute disconnect readiness
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             app.btMonitor.connectedDevices.collect { devices ->
                 val addresses = devices.map { it.address }
                 var ready = false
@@ -142,8 +142,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Compute smart duration suggestion
-        viewModelScope.launch {
+        // Compute smart duration suggestion on background dispatcher
+        viewModelScope.launch(Dispatchers.IO) {
             computeSmartSuggestion()
         }
     }
@@ -248,6 +248,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             val msg = if (newFav) "Set as Primary Sleep Target" else "Removed from Primary Sleep Targets"
             android.widget.Toast.makeText(getApplication(), msg, android.widget.Toast.LENGTH_SHORT).show()
             app.btMonitor.refresh()
+        }
+    }
+
+    fun refreshBluetooth() {
+        viewModelScope.launch {
+            HapticManager.vibrateClick(getApplication())
+            app.btMonitor.refresh(clearCache = true)
         }
     }
 

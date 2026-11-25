@@ -5,17 +5,40 @@ All notable changes to **SleepBT** are documented in this file.
 ## [1.0.2] - 2026-10-25
 
 ### Summary
-Version release 1.0.2 featuring a clean adaptive earbud battery display (removing the Case column and disclaimers whenever case status cannot be fetched), and a comprehensive 6-step interactive in-app tutorial explaining Volume Fade, Reconnect Blocker, Usage, Hearing Health, and Settings.
+Version release 1.0.2 featuring comprehensive 60/120fps UI smoothness optimizations, direct native Bluetooth battery retrieval (removing notification listener scraping), fix for timer notification counting in negative numbers (-0.12), clean adaptive earbud battery display (removing the Case column when unavailable), and a 6-step interactive in-app tutorial.
 
-### 🔋 Fast Pair Earbuds & Case Battery Sync
-- **Fast Pair Notification Listener**: Implemented `FastPairNotificationListener` (via `NotificationListenerService`) to automatically read earbuds and case battery percentages from Google Play Services (`BATTERY_NOTIFICATION_CHANNEL`) and companion apps (realme Link, OnePlus HeyMelody, Pixel Buds, Galaxy Wearable, etc.).
-- **Smart Adaptive Parser**: `FastPairNotificationParser` parses Left, Right, Case, and charging states (`Left 100% Case 80% Right 100%`) with name matching to active Bluetooth audio devices.
-- **Zero-Compromise Privacy Guarantee**: Strictly filters for battery notifications; all messages, emails, chats, and banking notifications are immediately discarded without inspection, logging, or storage.
-- **Persistent Telemetry & Instant Cold-Start Query**: Automatically syncs active notifications on startup and saves confirmed battery levels to SharedPreferences so Case and Earbuds levels display instantly.
-- **One-Tap Permission Setup**: If notification access is not yet granted, an unobtrusive helper chip in `HomeScreen` and a dedicated row in `SettingsScreen` guides the user with a single tap to the system settings toggle.
+### ⚡ 60/120fps Smooth UI & Performance Overhaul
+- **Eliminated Rotary Dial Draw Invalidation Loop**: In `HomeScreen.kt`, moved `centerPx` and `sizePx` state calculations out of `drawWithCache` to `Modifier.onSizeChanged`, and cached `sweepGradient`, stopping continuous recomposition and layout thrashing.
+- **RenderThread GPU Offloading**: Replaced `.background(AccentBlue.copy(alpha = glowAlpha))` on the breathing Start button and `.scale(scale)` on status pulse dots with `.graphicsLayer { ... }` transformations. Runs 100% on GPU RenderThread with zero Compose recomposition and zero layout passes.
+- **Cached Shader Brushes**: In `CircularTimerDisplay`, moved `Brush.sweepGradient` out of the per-frame `onDrawBehind` draw pass into `drawWithCache`.
+- **Debounced Bluetooth Refresh**: Collapsed Bluetooth broadcast bursts (A2DP, Headset, ACL, Battery) into a single debounced 40–80ms cycle in `BluetoothMonitor`, saving redundant reflection and IPC calls.
+- **Main-Thread Room Offloading**: Offloaded `getAllNow()` device queries and `computeSmartSuggestion()` strictly to `Dispatchers.IO`.
 
-### 🔋 Clean Adaptive Battery Display
-- **Case Column Removed When Unavailable**: In `HomeScreen.kt`, if case battery telemetry is unsupported or unavailable on the connected earbuds (`caseLevel !in 0..100`), the Case column and dividers are cleanly omitted. The card renders Left and Right cleanly without dead `--` placeholders or disclaimers. Case is only rendered when telemetry is verified.
+### ⏱️ Notification Negative Countdown Fix (-0.12)
+- **Eliminated Negative Chronometer Counting**: Fixed issue where Android's notification chronometer kept ticking into negative values (`-0:01`, `-0:12`) after the timer reached 0:00 while audio fade-out and Bluetooth disconnect were executing.
+- **Instant Finishing State**: Implemented `AppNotifications.finishingNotification()` with `setUsesChronometer(false)` and `setShowWhen(false)`, instantly transitioning the notification to "Stopping audio & disconnecting..." before cleanly removing it.
+
+### 🔋 Accurate Discrete Working Buds Display & Direct Telemetry (Zero Notification Scraping)
+- **100% Privacy-First Direct In-App Telemetry**: Completely removed all notification scraping, `NotificationListenerService`, and notification access permission requirements. The app now fetches battery telemetry directly from Bluetooth hardware and AOSP metadata APIs.
+- **Working Buds Only Display**: Strictly displays only the earbud(s) actually in use:
+  - When only the Left bud is out of the case, only the Left bud status is shown.
+  - When only the Right bud is out of the case, only the Right bud status is shown.
+  - When both buds are in use, both Left and Right are displayed.
+  - When neither discrete bud is reported, falls back to unified main battery level.
+  - Earbuds placed inside the charging case (detected via AOSP charging keys 13/14) are marked inactive (`-1`) and excluded from active display.
+- **Zero Stale Bud Cache Leakage**: Eliminated cache resurrection bugs in `readBatteryInfo()` and SharedPreferences where an earbud placed back into the case remained displayed because of old cached values.
+- **Instant Notification Disappearance on Disconnect**: The connection battery status notification (`NOTIF_BATTERY_STATUS`) immediately vanishes from the Android notification shade upon Bluetooth disconnection (`ACTION_ACL_DISCONNECTED`, profile disconnection, Bluetooth adapter `STATE_OFF`, or timer disconnect).
+- **Clean Adaptive Battery Display**: When case battery is not reported, the Case column and dividers are cleanly omitted without empty `--` placeholders or synthetic values.
+
+### 📊 Usage Tab Pull-to-Refresh & Data Accuracy Hardening
+- **Eliminated Infinite Loading Spinner**: Resolved issue where performing pull-to-refresh in the Usage tab kept spinning indefinitely.
+- **IO Dispatcher Offloading**: Offloaded Room database session aggregation and cleanup (`sessionsInRangeNow`, `deleteEmptySessions`, `pruneOldSessions`) to `Dispatchers.IO`, preventing main thread freezes.
+- **Atomic State Updates & Finally Block**: Guaranteed `isRefreshing = false` in a coroutine `try / finally` block and updated state via `_state.update { copy(...) }` to prevent UI state clobbering.
+- **Safe Lifecycle Disconnection**: Added local refresh state with `DisposableEffect` cleanup on the screen to prevent stuck indicators when navigating away from the tab during refresh.
+- **Database Self-Healing & Corrupted Record Sanitization**: Automatically detects and purges impossible/corrupted sessions (`actualDurationMin > 720` or `< 0`), orphaned unclosed sessions from killed processes (`endTime IS NULL` while timer is stopped), and inflated `daily_usage` records (`total_minutes > 1440`).
+- **Eliminated Stale Connection Timestamps**: Added automatic expiration to `bt_connection_tracker` SharedPreferences in `BluetoothReceiver.getActiveConnectTime()`, purging timestamps older than 12 hours or in the future, and overwriting with fresh connection timestamps on `ACTION_ACL_CONNECTED`.
+- **Deduplicated Disconnect Background Sessions**: Prevented duplicate session insertion on disconnect by checking if a timer session was active or ended within the last 2 minutes (`getRecentSessionForDevice`).
+- **Synchronized Daily Usage & Chart Totals**: Re-syncs `daily_usage` aggregates directly from validated sessions, ensuring chart bar sums, stat cards, and device breakdowns display 100% consistent numbers without desynchronization.
 
 ### 📚 Comprehensive 6-Step In-App Tutorial
 - **Step 1 • Sleep Timer & Presets**: How to set duration with the smooth rotary dial and quick preset pills (15m, 30m, 45m, 60m).

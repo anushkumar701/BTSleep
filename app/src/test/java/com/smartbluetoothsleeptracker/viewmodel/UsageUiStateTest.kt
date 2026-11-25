@@ -72,4 +72,19 @@ class UsageUiStateTest {
         val minutes = com.smartbluetoothsleeptracker.service.TimerCalculations.calculateDurationMinutes(durationMs)
         assertEquals(0, minutes)
     }
+
+    @Test
+    fun testIsRefreshingPreservation() {
+        val initial = UsageUiState(isRefreshing = true)
+        assertEquals(true, initial.isRefreshing)
+
+        // Verifying copy semantics preserve isRefreshing unless explicitly overwritten
+        val updated = initial.copy(totalMinutes = 120, totalSessions = 4)
+        assertEquals(true, updated.isRefreshing)
+        assertEquals(120, updated.totalMinutes)
+        assertEquals(4, updated.totalSessions)
+
+        val finished = updated.copy(isRefreshing = false)
+        assertEquals(false, finished.isRefreshing)
+    }
 }

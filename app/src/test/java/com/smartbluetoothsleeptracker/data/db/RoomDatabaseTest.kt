@@ -91,4 +91,70 @@ class RoomDatabaseTest {
         assertEquals(true, loaded?.disconnectConfirmed)
         assertEquals(5, loaded?.extendedMinutes)
     }
+
+    @Test
+    fun testSanitization_deletesCorruptedAndOrphanedSessions() = runBlocking {
+        // Valid session
+        sessionDao.insert(
+            SessionEntity(
+                deviceAddress = "AA:BB:CC:DD:EE:FF",
+                startTime = 1000L,
+                endTime = 2000L,
+                plannedDurationMin = 30,
+                actualDurationMin = 30,
+                date = "2026-10-26"
+            )
+        )
+        // Corrupted session (> 12 hours = > 720m)
+        sessionDao.insert(
+            SessionEntity(
+                deviceAddress = "AA:BB:CC:DD:EE:FF",
+                startTime = 1000L,
+                endTime = 2000L,
+                plannedDurationMin = 30,
+                actualDurationMin = 4320,
+                date = "2026-10-26"
+            )
+        )
+        // Orphaned session (endTime is null)
+        sessionDao.insert(
+            SessionEntity(
+                deviceAddress = "AA:BB:CC:DD:EE:FF",
+                startTime = 1000L,
+                endTime = null,
+                plannedDurationMin = 30,
+                date = "2026-10-26"
+            )
+        )
+
+        assertEquals(3, sessionDao.sessionsForDateNow("2026-10-26").size)
+
+        sessionDao.deleteCorruptedSessions()
+        assertEquals(2, sessionDao.sessionsForDateNow("2026-10-26").size)
+
+        sessionDao.deleteOrphanedSessions()
+        val remaining = sessionDao.sessionsForDateNow("2026-10-26")
+        assertEquals(1, remaining.size)
+        assertEquals(30, remaining[0].actualDurationMin)
+    }
+
+    @Test
+    fun testSanitization_deletesCorruptedDailyUsage() = runBlocking {
+        // Normal usage
+        dailyUsageDao.upsert(
+            DailyUsageEntity(date = "2026-10-26", deviceAddress = "AA:BB:CC:DD:EE:FF", totalMinutes = 60, sessionCount = 2)
+        )
+        // Corrupted usage (> 1440m = 24h)
+        dailyUsageDao.upsert(
+            DailyUsageEntity(date = "2026-10-25", deviceAddress = "AA:BB:CC:DD:EE:FF", totalMinutes = 5000, sessionCount = 1)
+        )
+
+        assertEquals(2, dailyUsageDao.usageInRangeNow("2026-10-20", "2026-10-27").size)
+
+        dailyUsageDao.deleteCorruptedUsage()
+        val remaining = dailyUsageDao.usageInRangeNow("2026-10-20", "2026-10-27")
+        assertEquals(1, remaining.size)
+        assertEquals("2026-10-26", remaining[0].date)
+        assertEquals(60, remaining[0].totalMinutes)
+    }
 }

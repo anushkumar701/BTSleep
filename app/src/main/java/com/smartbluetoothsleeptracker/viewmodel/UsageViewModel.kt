@@ -6,10 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.smartbluetoothsleeptracker.SleepBTApp
 import com.smartbluetoothsleeptracker.data.db.*
 import com.smartbluetoothsleeptracker.receiver.BluetoothReceiver
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -69,7 +71,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setPeriod(p: UsagePeriod) { _period.value = p }
 
-    private suspend fun loadData(period: UsagePeriod) {
+    private suspend fun loadData(period: UsagePeriod) = withContext(Dispatchers.IO) {
         val today = LocalDate.now()
         val fmt = DateTimeFormatter.ISO_LOCAL_DATE
         val (from, to) = when (period) {
@@ -80,15 +82,40 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val fromStr = from.format(fmt)
         val toStr = to.format(fmt)
 
+        // ── Database Sanitization & Healing ──
         app.db.sessionDao().deleteEmptySessions()
+        app.db.sessionDao().deleteCorruptedSessions() // removes sessions > 12h or < 0
+        val isTimerRunning = app.timerState.value.isRunning
+        if (!isTimerRunning) {
+            app.db.sessionDao().deleteOrphanedSessions() // purge dead unclosed sessions
+        }
+        app.db.dailyUsageDao().deleteCorruptedUsage() // removes daily_usage > 24h
         app.db.sessionDao().pruneOldSessions(500)
+
+        // Resync daily_usage from valid sessions in date range to heal any pre-existing inflated stats
+        val validSessions = app.db.sessionDao().sessionsInRangeNow(fromStr, toStr)
+            .filter { (it.actualDurationMin ?: 0) in 1..720 }
+        val sessionsGrouped = validSessions.groupBy { it.date to it.deviceAddress }
+        sessionsGrouped.forEach { (key, list) ->
+            val (date, addr) = key
+            val totalMin = list.sumOf { it.actualDurationMin ?: 0 }
+            val count = list.size
+            app.db.dailyUsageDao().upsert(
+                com.smartbluetoothsleeptracker.data.db.DailyUsageEntity(
+                    date = date,
+                    deviceAddress = addr,
+                    totalMinutes = totalMin,
+                    sessionCount = count
+                )
+            )
+        }
 
         // Fetch raw sessions and daily usage in date range
         val rawSessions = app.db.sessionDao().sessionsInRangeNow(fromStr, toStr)
         val dailyUsages = app.db.dailyUsageDao().usageInRangeNow(fromStr, toStr)
 
         val sessions = rawSessions
-            .filter { (it.actualDurationMin ?: 0) > 0 || (it.endTime == null && it.plannedDurationMin > 0) }
+            .filter { (it.actualDurationMin ?: 0) in 1..720 || (it.endTime == null && isTimerRunning && it.plannedDurationMin > 0) }
             .distinctBy { it.id }
             .sortedByDescending { it.startTime }
             .toMutableList()
@@ -99,25 +126,25 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val now = System.currentTimeMillis()
 
         // Check if a timer session is actively running
-        val activeSession = sessions.find { it.endTime == null }
+        val activeSession = if (isTimerRunning) sessions.find { it.endTime == null } else null
         val activeTimerAddr = activeSession?.deviceAddress
 
         val liveMinutesMap = mutableMapOf<String, Int>()
         activeAddrs.forEach { addr ->
-            if (activeSession != null && addr == activeTimerAddr) {
+            if (isTimerRunning && activeSession != null && addr == activeTimerAddr) {
                 // Live duration of the running timer
                 val elapsedMs = (now - activeSession.startTime).coerceAtLeast(0L)
                 val liveMin = com.smartbluetoothsleeptracker.service.TimerCalculations.calculateDurationMinutes(elapsedMs)
-                if (liveMin > 0) {
+                if (liveMin in 1..240) {
                     liveMinutesMap[addr] = liveMin
                 }
-            } else if (activeSession == null || addr != activeTimerAddr) {
-                // Background connection time since last recorded event
+            } else if (!isTimerRunning) {
+                // Background connection time since last recorded event (capped at 12 hours)
                 val startTime = BluetoothReceiver.getActiveConnectTime(app, addr)
-                if (startTime > 0L && now > startTime) {
+                if (startTime > 0L && now > startTime && (now - startTime) < 12 * 60 * 60_000L) {
                     val durationMs = now - startTime
                     val liveMin = com.smartbluetoothsleeptracker.service.TimerCalculations.calculateDurationMinutes(durationMs)
-                    if (liveMin > 0) {
+                    if (liveMin in 1..720) {
                         liveMinutesMap[addr] = liveMin
                     }
                 }
@@ -141,8 +168,8 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 ?: return@mapNotNull null
             val devSessions = sessions.filter { it.deviceAddress == addr && it.endTime != null && (it.actualDurationMin ?: 0) > 0 }
-            val sessionMins = devSessions.sumOf { it.actualDurationMin ?: 0 }
-            val dailyMins = dailyUsages.filter { it.deviceAddress == addr }.sumOf { it.totalMinutes }
+            val sessionMins = devSessions.sumOf { (it.actualDurationMin ?: 0).coerceIn(0, 720) }
+            val dailyMins = dailyUsages.filter { it.deviceAddress == addr }.sumOf { it.totalMinutes.coerceIn(0, 1440) }
             val baseMins = maxOf(sessionMins, dailyMins)
             val liveMins = liveMinutesMap[addr] ?: 0
             val totalMins = baseMins + liveMins
@@ -175,7 +202,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                         if (it.endTime == null) return@filter false
                         val sTime = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(it.startTime), ZoneId.systemDefault())
                         sTime.toLocalDate() == today && sTime.hour in h until (h + 4)
-                    }.sumOf { it.actualDurationMin ?: 0 }
+                    }.sumOf { (it.actualDurationMin ?: 0).coerceIn(0, 720) }
 
                     val isCurrent = (h == currentBucket)
                     if (isCurrent && totalLiveMinutes > 0) {
@@ -192,8 +219,8 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                     
                     var dayMins = deviceAddrs.sumOf { addr ->
                         val devSess = sessions.filter { it.deviceAddress == addr && it.date == dStr && it.endTime != null }
-                        val sMins = devSess.sumOf { it.actualDurationMin ?: 0 }
-                        val dMins = dailyUsages.filter { it.deviceAddress == addr && it.date == dStr }.sumOf { it.totalMinutes }
+                        val sMins = devSess.sumOf { (it.actualDurationMin ?: 0).coerceIn(0, 720) }
+                        val dMins = dailyUsages.filter { it.deviceAddress == addr && it.date == dStr }.sumOf { it.totalMinutes.coerceIn(0, 1440) }
                         maxOf(sMins, dMins)
                     }
                     val isToday = (d == today)
@@ -216,13 +243,13 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
                                 !d.isBefore(wStart) && !d.isAfter(wEnd)
                             } catch (_: Exception) { false }
                         }
-                        val sMins = devSess.sumOf { it.actualDurationMin ?: 0 }
+                        val sMins = devSess.sumOf { (it.actualDurationMin ?: 0).coerceIn(0, 720) }
                         val dMins = dailyUsages.filter { u ->
                             u.deviceAddress == addr && try {
                                 val d = LocalDate.parse(u.date, fmt)
                                 !d.isBefore(wStart) && !d.isAfter(wEnd)
                             } catch (_: Exception) { false }
-                        }.sumOf { it.totalMinutes }
+                        }.sumOf { it.totalMinutes.coerceIn(0, 1440) }
                         maxOf(sMins, dMins)
                     }
                     val isCurrent = !today.isBefore(wStart) && !today.isAfter(wEnd)
@@ -237,20 +264,22 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
         val totalMins = stats.sumOf { it.totalMinutes }
         val totalSess = stats.sumOf { it.sessionCount }
 
-        _state.value = UsageUiState(
-            period = period,
-            sessions = sessions,
-            deviceStats = stats,
-            chartItems = chartBars,
-            chartTitle = when (period) {
-                UsagePeriod.TODAY -> "Today's Hourly Usage"
-                UsagePeriod.WEEK -> "Last 7 Days"
-                UsagePeriod.MONTH -> "Last 30 Days (Weekly)"
-            },
-            totalMinutes = totalMins,
-            totalSessions = totalSess,
-            totalDevices = stats.size
-        )
+        _state.update { current ->
+            current.copy(
+                period = period,
+                sessions = sessions,
+                deviceStats = stats,
+                chartItems = chartBars,
+                chartTitle = when (period) {
+                    UsagePeriod.TODAY -> "Today's Hourly Usage"
+                    UsagePeriod.WEEK -> "Last 7 Days"
+                    UsagePeriod.MONTH -> "Last 30 Days (Weekly)"
+                },
+                totalMinutes = totalMins,
+                totalSessions = totalSess,
+                totalDevices = stats.size
+            )
+        }
     }
 
     fun toggleFavorite(address: String) {
@@ -332,11 +361,13 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
             PendingActionType.RESET_USAGE -> {
                 app.db.dailyUsageDao().deleteForDevice(addr)
                 app.db.sessionDao().deleteForDevice(addr)
+                BluetoothReceiver.clearActiveConnectTime(app, addr)
             }
             PendingActionType.REMOVE_DEVICE -> {
                 app.db.dailyUsageDao().deleteForDevice(addr)
                 app.db.sessionDao().deleteForDevice(addr)
                 app.db.deviceDao().deleteByAddress(addr)
+                BluetoothReceiver.clearActiveConnectTime(app, addr)
             }
             null -> {}
         }
@@ -358,7 +389,7 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun syncDailyUsageForDeviceAndDate(address: String, date: String) {
         val remainingSessions = app.db.sessionDao().sessionsForDateNow(date)
             .filter { it.deviceAddress == address }
-        val totalMin = remainingSessions.sumOf { it.actualDurationMin ?: it.plannedDurationMin }
+        val totalMin = remainingSessions.sumOf { (it.actualDurationMin ?: it.plannedDurationMin).coerceIn(0, 720) }
         val count = remainingSessions.size
 
         if (totalMin > 0 || count > 0) {
@@ -382,16 +413,29 @@ class UsageViewModel(application: Application) : AndroidViewModel(application) {
             if (settings.activeSessionId > 0L) return@launch
             app.db.sessionDao().deleteAll()
             app.db.dailyUsageDao().deleteAll()
+            BluetoothReceiver.clearAllActiveConnectTimes(app)
             loadData(_period.value)
+        }
+    }
+
+    suspend fun refreshNow() {
+        _state.update { it.copy(isRefreshing = true) }
+        try {
+            withContext(Dispatchers.IO) {
+                app.btMonitor.refresh(clearCache = true)
+                loadData(_period.value)
+            }
+            delay(350L)
+        } catch (e: Exception) {
+            android.util.Log.e("UsageViewModel", "Error refreshing usage", e)
+        } finally {
+            _state.update { it.copy(isRefreshing = false) }
         }
     }
 
     fun refresh() {
         viewModelScope.launch {
-            _state.update { it.copy(isRefreshing = true) }
-            loadData(_period.value)
-            delay(300)
-            _state.update { it.copy(isRefreshing = false) }
+            refreshNow()
         }
     }
 

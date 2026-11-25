@@ -14,11 +14,13 @@ object AppNotifications {
     const val CHANNEL_TIMER = "sleepbt_timer"
     const val CHANNEL_ALERTS = "sleepbt_alerts"
     const val CHANNEL_COOLDOWN = "sleepbt_cooldown"
+    const val CHANNEL_DEVICE_STATUS = "sleepbt_device_status"
 
     const val NOTIF_TIMER = 1
     const val NOTIF_WARNING = 2
     const val NOTIF_COOLDOWN = 3
     const val NOTIF_DISCONNECT_RESULT = 4
+    const val NOTIF_BATTERY_STATUS = 1000
 
     fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -40,6 +42,33 @@ object AppNotifications {
                 setShowBadge(false)
             }
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_DEVICE_STATUS, "Device Status & Battery", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Shows battery percentage when Bluetooth audio connects"
+                setShowBadge(false)
+            }
+        )
+    }
+
+    /**
+     * Clean, informative notification displayed when a Bluetooth audio device connects,
+     * highlighting the device name and battery levels.
+     */
+    fun batteryStatusNotification(
+        ctx: Context,
+        deviceName: String,
+        batterySummary: String
+    ): NotificationCompat.Builder {
+        val dev = if (deviceName.isNotBlank() && deviceName != "Unknown") deviceName else "Bluetooth Audio"
+        return NotificationCompat.Builder(ctx, CHANNEL_DEVICE_STATUS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("$dev Connected")
+            .setContentText(batterySummary)
+            .setSubText("Connected")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(launchIntent(ctx))
     }
 
     /**
@@ -90,7 +119,7 @@ object AppNotifications {
                 val endFormatted = timeFormat.format(java.util.Date(endTimeMillis))
                 "Turns off at $endFormatted"
             }
-            else -> if (remainingText.isNotBlank()) "$remainingText remaining" else "Sleep timer active"
+            else -> "Finishing session..."
         }
 
         val subText = when {
@@ -123,9 +152,29 @@ object AppNotifications {
             builder.setChronometerCountDown(true)
             builder.setWhen(endTimeMillis)
             builder.setShowWhen(true)
+        } else {
+            builder.setUsesChronometer(false)
+            builder.setShowWhen(false)
         }
 
         return builder
+    }
+
+    /**
+     * Immediate non-ticking notification shown when timer finishes and audio fade/disconnect sequence begins.
+     * Guarantees zero chronometer display and prevents negative time (-0:12) from rendering.
+     */
+    fun finishingNotification(ctx: Context): NotificationCompat.Builder {
+        return NotificationCompat.Builder(ctx, CHANNEL_TIMER)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Finishing SleepBT")
+            .setContentText("Stopping audio & disconnecting...")
+            .setSubText("Finishing")
+            .setOngoing(true)
+            .setSilent(true)
+            .setUsesChronometer(false)
+            .setShowWhen(false)
+            .setContentIntent(launchIntent(ctx))
     }
 
     /**

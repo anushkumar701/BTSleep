@@ -18,6 +18,9 @@ import kotlinx.coroutines.flow.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
+import com.smartbluetoothsleeptracker.core.notification.AppNotifications
+import com.smartbluetoothsleeptracker.data.prefs.AppPrefs
+
 data class BatteryInfo(
     val mainLevel: Int = -1,    // 0..100, -1 = unknown
     val leftLevel: Int = -1,    // 0..100, -1 = unknown
@@ -28,6 +31,31 @@ data class BatteryInfo(
 ) {
     val isKnown: Boolean
         get() = (mainLevel in 0..100) || (leftLevel in 0..100) || (rightLevel in 0..100) || (caseLevel in 0..100)
+
+    fun formatSummary(deviceType: DeviceType): String {
+        val hasLeft = leftLevel in 0..100
+        val hasRight = rightLevel in 0..100
+        val hasCase = caseLevel in 0..100
+        val parts = mutableListOf<String>()
+
+        if (hasLeft && hasRight) {
+            parts.add("Left: $leftLevel%")
+            parts.add("Right: $rightLevel%")
+        } else if (hasLeft) {
+            parts.add("Left: $leftLevel%")
+        } else if (hasRight) {
+            parts.add("Right: $rightLevel%")
+        } else if (mainLevel in 0..100) {
+            parts.add("Battery: $mainLevel%")
+        }
+
+        if (hasCase) {
+            val charging = if (caseBattery?.charging == true) " ⚡" else ""
+            parts.add("Case: $caseLevel%$charging")
+        }
+
+        return if (parts.isNotEmpty()) parts.joinToString("  •  ") else "Connected"
+    }
 }
 
 data class ConnectedDevice(
@@ -45,10 +73,29 @@ data class ConnectedDevice(
  */
 class BluetoothMonitor(
     private val context: Context,
-    private val db: AppDatabase
+    private val db: AppDatabase,
+    private val prefs: AppPrefs? = null
 ) {
     companion object {
         private const val TAG = "BtMonitor"
+
+        val isConnectedMethod: java.lang.reflect.Method? by lazy {
+            runCatching {
+                BluetoothDevice::class.java.getDeclaredMethod("isConnected").apply { isAccessible = true }
+            }.getOrNull()
+        }
+
+        val getBatteryLevelMethod: java.lang.reflect.Method? by lazy {
+            runCatching {
+                BluetoothDevice::class.java.getMethod("getBatteryLevel").apply { isAccessible = true }
+            }.getOrNull()
+        }
+
+        val getMetadataMethod: java.lang.reflect.Method? by lazy {
+            runCatching {
+                BluetoothDevice::class.java.getMethod("getMetadata", Int::class.javaPrimitiveType).apply { isAccessible = true }
+            }.getOrNull()
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -67,7 +114,20 @@ class BluetoothMonitor(
 
     private val aclConnectedAddresses = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val deviceBatteryCache = java.util.concurrent.ConcurrentHashMap<String, BatteryInfo>()
+    private val notifiedConnectionAddresses = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val lastNotifiedSummary = ConcurrentHashMap<String, String>()
+    @Volatile
+    private var cachedConnectBatteryNotifEnabled: Boolean = true
     private val refreshMutex = kotlinx.coroutines.sync.Mutex()
+    private var debouncedRefreshJob: Job? = null
+
+    fun triggerDebouncedRefresh(delayMs: Long = 80L) {
+        debouncedRefreshJob?.cancel()
+        debouncedRefreshJob = scope.launch {
+            if (delayMs > 0) delay(delayMs)
+            refreshConnectedDevices()
+        }
+    }
 
     val caseProviders = mutableListOf<CaseBatteryProvider>()
     private val caseBatteryCache = ConcurrentHashMap<String, CaseBattery>()
@@ -97,80 +157,7 @@ class BluetoothMonitor(
             caseLevel = caseBattery.percent,
             caseBattery = caseBattery
         )
-        scope.launch { refreshConnectedDevices() }
-    }
-
-    fun updateFromNotification(
-        deviceName: String?,
-        left: Int = -1,
-        right: Int = -1,
-        case: Int = -1,
-        main: Int = -1,
-        isCaseCharging: Boolean? = null
-    ) {
-        val currentConnected = _connectedDevices.value
-        if (currentConnected.isEmpty()) return
-
-        val target: ConnectedDevice = (if (!deviceName.isNullOrBlank()) {
-            currentConnected.firstOrNull { dev ->
-                FastPairNotificationParser.matchesDevice(deviceName, dev.name)
-            } ?: if (currentConnected.size == 1 && currentConnected[0].type == DeviceType.EARBUDS) {
-                currentConnected[0]
-            } else null
-        } else if (currentConnected.size == 1) {
-            currentConnected[0]
-        } else {
-            currentConnected.firstOrNull { it.type == DeviceType.EARBUDS }
-        }) ?: return
-
-        val addr = target.address
-        val existing = deviceBatteryCache[addr] ?: target.battery ?: BatteryInfo()
-
-        val finalLeft = if (left in 0..100) left else existing.leftLevel
-        val finalRight = if (right in 0..100) right else existing.rightLevel
-        val finalCase = if (case in 0..100) case else existing.caseLevel
-
-        val finalMain = when {
-            main in 0..100 -> main
-            finalLeft in 0..100 && finalRight in 0..100 -> (finalLeft + finalRight) / 2
-            finalLeft in 0..100 -> finalLeft
-            finalRight in 0..100 -> finalRight
-            existing.mainLevel in 0..100 -> existing.mainLevel
-            else -> -1
-        }
-
-        val caseBat = if (finalCase in 0..100) {
-            CaseBattery(
-                percent = finalCase,
-                charging = isCaseCharging ?: existing.caseBattery?.charging,
-                seenAtMillis = System.currentTimeMillis()
-            )
-        } else existing.caseBattery
-
-        if (caseBat != null) {
-            caseBatteryCache[addr] = caseBat
-        }
-
-        val updated = BatteryInfo(
-            mainLevel = finalMain,
-            leftLevel = finalLeft,
-            rightLevel = finalRight,
-            caseLevel = finalCase,
-            caseBattery = caseBat,
-            caseSupport = if (finalCase in 0..100) CaseSupport.Supported else existing.caseSupport
-        )
-
-        deviceBatteryCache[addr] = updated
-
-        val prefs = context.getSharedPreferences("device_battery_prefs", Context.MODE_PRIVATE).edit()
-        if (finalMain in 0..100) prefs.putInt("main_$addr", finalMain)
-        if (finalLeft in 0..100) prefs.putInt("left_$addr", finalLeft)
-        if (finalRight in 0..100) prefs.putInt("right_$addr", finalRight)
-        if (finalCase in 0..100) prefs.putInt("case_$addr", finalCase)
-        prefs.apply()
-
-        Log.i(TAG, "Battery updated from notification for ${target.name} ($addr): L=$finalLeft%, R=$finalRight%, Case=$finalCase%")
-        scope.launch { refreshConnectedDevices() }
+        triggerDebouncedRefresh(40L)
     }
 
     suspend fun queryCaseBattery(device: BluetoothDevice, name: String = ""): CaseBattery? {
@@ -194,7 +181,7 @@ class BluetoothMonitor(
                 BluetoothProfile.A2DP -> a2dpProfile = proxy
                 BluetoothProfile.HEADSET -> headsetProfile = proxy
             }
-            scope.launch { refreshConnectedDevices() }
+            triggerDebouncedRefresh(60L)
         }
 
         override fun onServiceDisconnected(profile: Int) {
@@ -202,7 +189,7 @@ class BluetoothMonitor(
                 BluetoothProfile.A2DP -> a2dpProfile = null
                 BluetoothProfile.HEADSET -> headsetProfile = null
             }
-            scope.launch { refreshConnectedDevices() }
+            triggerDebouncedRefresh(60L)
         }
     }
 
@@ -228,22 +215,23 @@ class BluetoothMonitor(
                         Log.i(TAG, "ACL connected: ${device.name ?: device.address}")
                         scope.launch {
                             registerDevice(device)
-                            refreshConnectedDevices()
                         }
+                        triggerDebouncedRefresh(40L)
                         onDeviceConnected?.invoke(device)
                     } else {
-                        scope.launch { refreshConnectedDevices() }
+                        triggerDebouncedRefresh(60L)
                     }
                 }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
                     if (device != null) {
                         aclConnectedAddresses.remove(device.address)
                         deviceBatteryCache.remove(device.address)
+                        dismissBatteryNotification(device.address)
                         Log.i(TAG, "ACL disconnected: ${device.name ?: device.address}")
-                        scope.launch { refreshConnectedDevices() }
+                        triggerDebouncedRefresh(20L)
                         onDeviceDisconnected?.invoke(device)
                     } else {
-                        scope.launch { refreshConnectedDevices() }
+                        triggerDebouncedRefresh(60L)
                     }
                 }
                 BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
@@ -255,23 +243,24 @@ class BluetoothMonitor(
                             Log.i(TAG, "Profile connected: ${device.name ?: device.address}")
                             scope.launch {
                                 registerDevice(device)
-                                refreshConnectedDevices()
                             }
+                            triggerDebouncedRefresh(40L)
                             onDeviceConnected?.invoke(device)
                         } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                             aclConnectedAddresses.remove(device.address)
+                            dismissBatteryNotification(device.address)
                             Log.i(TAG, "Profile disconnected: ${device.name ?: device.address}")
-                            scope.launch { refreshConnectedDevices() }
+                            triggerDebouncedRefresh(20L)
                             onDeviceDisconnected?.invoke(device)
                         } else {
-                            scope.launch { refreshConnectedDevices() }
+                            triggerDebouncedRefresh(60L)
                         }
                     } else {
-                        scope.launch { refreshConnectedDevices() }
+                        triggerDebouncedRefresh(60L)
                     }
                 }
                 Intent.ACTION_HEADSET_PLUG -> {
-                    scope.launch { refreshConnectedDevices() }
+                    triggerDebouncedRefresh(60L)
                 }
                 "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED",
                 "com.android.bluetooth.btservice.action.BATTERY_LEVEL_CHANGED" -> {
@@ -281,7 +270,15 @@ class BluetoothMonitor(
                         val updated = current.copy(mainLevel = lvl)
                         deviceBatteryCache[device.address] = updated
                     }
-                    scope.launch { refreshConnectedDevices() }
+                    triggerDebouncedRefresh(40L)
+                }
+                "android.bluetooth.device.action.METADATA_CHANGED",
+                "com.google.android.gms.nearby.fastpair.ACTION_STATUS_CHANGED",
+                "com.samsung.accessory.intent.action.BATTERY_UPDATE" -> {
+                    if (device != null) {
+                        Log.i(TAG, "Device metadata/battery update broadcast received for ${device.address}")
+                    }
+                    triggerDebouncedRefresh(30L)
                 }
                 BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT -> {
                     val cmd = intent.getStringExtra(BluetoothHeadset.EXTRA_VENDOR_SPECIFIC_HEADSET_EVENT_CMD)
@@ -324,7 +321,7 @@ class BluetoothMonitor(
                             }
                         }
                     }
-                    scope.launch { refreshConnectedDevices() }
+                    triggerDebouncedRefresh(80L)
                 }
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
@@ -332,15 +329,16 @@ class BluetoothMonitor(
                     if (state == BluetoothAdapter.STATE_OFF) {
                         aclConnectedAddresses.clear()
                         deviceBatteryCache.clear()
+                        dismissAllBatteryNotifications()
                         a2dpProfile = null
                         headsetProfile = null
-                        scope.launch { refreshConnectedDevices() }
+                        triggerDebouncedRefresh(20L)
                     } else if (state == BluetoothAdapter.STATE_ON) {
                         runCatching {
                             adapter?.getProfileProxy(context, profileServiceListener, BluetoothProfile.A2DP)
                             adapter?.getProfileProxy(context, profileServiceListener, BluetoothProfile.HEADSET)
                         }
-                        scope.launch { refreshConnectedDevices() }
+                        triggerDebouncedRefresh(80L)
                     }
                 }
             }
@@ -349,10 +347,10 @@ class BluetoothMonitor(
 
     private val audioDeviceCallback = object : android.media.AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) {
-            scope.launch { refreshConnectedDevices() }
+            triggerDebouncedRefresh(60L)
         }
         override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) {
-            scope.launch { refreshConnectedDevices() }
+            triggerDebouncedRefresh(60L)
         }
     }
 
@@ -392,11 +390,20 @@ class BluetoothMonitor(
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
         runCatching { audioManager?.registerAudioDeviceCallback(audioDeviceCallback, null) }
 
+        prefs?.let { p ->
+            scope.launch {
+                p.settings.map { it.connectBatteryNotificationEnabled }.distinctUntilChanged().collect {
+                    cachedConnectBatteryNotifEnabled = it
+                }
+            }
+        }
+
         _btEnabled.value = adapter?.isEnabled ?: false
         scope.launch { refreshConnectedDevices() }
     }
 
     fun stop() {
+        dismissAllBatteryNotifications()
         runCatching { context.unregisterReceiver(receiver) }
         runCatching {
             a2dpProfile?.let { adapter?.closeProfileProxy(BluetoothProfile.A2DP, it) }
@@ -409,7 +416,11 @@ class BluetoothMonitor(
         scope.cancel()
     }
 
-    fun refresh() {
+    fun refresh(clearCache: Boolean = false) {
+        if (clearCache) {
+            deviceBatteryCache.clear()
+            caseBatteryCache.clear()
+        }
         scope.launch { refreshConnectedDevices() }
     }
 
@@ -490,9 +501,7 @@ class BluetoothMonitor(
                         val isConnectedByAudioName = devName.isNotBlank() && audioDeviceNames.any { it.equals(devName, ignoreCase = true) }
                         val isConnectedByAcl = aclConnectedAddresses.contains(devAddr)
                         val isReflectConnected = runCatching {
-                            val m = device.javaClass.getDeclaredMethod("isConnected")
-                            m.isAccessible = true
-                            m.invoke(device) as? Boolean ?: false
+                            isConnectedMethod?.invoke(device) as? Boolean ?: false
                         }.getOrDefault(false)
 
                         // Ground-truth check:
@@ -544,14 +553,63 @@ class BluetoothMonitor(
                                     battery = batteryInfo
                                 )
                             )
+                            notifyDeviceConnectedIfEligible(device, devName, batteryInfo, devType)
                         }
                     }
                 }
             }
 
-            _connectedDevices.value = connected.distinctBy { it.address }
+            val finalConnected = connected.distinctBy { it.address }
+            val currentAddrs = finalConnected.map { it.address }.toSet()
+
+            // Automatically dismiss battery notification for any device that has disconnected
+            val disconnectedAddrs = notifiedConnectionAddresses.filter { !currentAddrs.contains(it) }
+            disconnectedAddrs.forEach { addr ->
+                dismissBatteryNotification(addr)
+            }
+
+            notifiedConnectionAddresses.retainAll(currentAddrs)
+            lastNotifiedSummary.keys.retainAll(currentAddrs)
+
+            _connectedDevices.value = finalConnected
         } finally {
             refreshMutex.unlock()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun notifyDeviceConnectedIfEligible(
+        device: BluetoothDevice,
+        devName: String,
+        info: BatteryInfo,
+        devType: DeviceType
+    ) {
+        if (!cachedConnectBatteryNotifEnabled) return
+
+        // Audio devices only (Earbuds, Neckbands, Headphones)
+        if (devType != DeviceType.EARBUDS && devType != DeviceType.NECKBAND && devType != DeviceType.WIRED_HEADPHONES) {
+            return
+        }
+
+        val addr = device.address
+        val summary = info.formatSummary(devType)
+        val isNew = notifiedConnectionAddresses.add(addr)
+        val prev = lastNotifiedSummary[addr]
+
+        // Trigger notification if newly connected, or if battery summary has updated
+        if (isNew || (prev != null && prev != summary)) {
+            lastNotifiedSummary[addr] = summary
+            val nm = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+            val notif = AppNotifications.batteryStatusNotification(
+                ctx = context,
+                deviceName = devName.ifBlank { "Bluetooth Audio" },
+                batterySummary = summary
+            ).build()
+            runCatching {
+                val notifId = AppNotifications.NOTIF_BATTERY_STATUS + (addr.hashCode() and 0x7FFF)
+                nm.notify(notifId, notif)
+                Log.i(TAG, "Posted battery status notification for $devName: $summary (id=$notifId)")
+            }
         }
     }
 
@@ -637,89 +695,173 @@ class BluetoothMonitor(
         }
     }
 
+    private fun parseMetadataInt(bytes: ByteArray?): Int? {
+        if (bytes == null || bytes.isEmpty()) return null
+        val str = String(bytes, Charsets.UTF_8).trim()
+        val num = str.toIntOrNull()
+        if (num != null) return if (num in 0..100) num else null
+        val raw = bytes[0].toInt() and 0xFF
+        return if (raw in 0..100) raw else null
+    }
+
+    private fun parseMetadataBool(bytes: ByteArray?): Boolean? {
+        if (bytes == null || bytes.isEmpty()) return null
+        val str = String(bytes, Charsets.UTF_8).trim()
+        if (str.equals("true", ignoreCase = true) || str == "1") return true
+        if (str.equals("false", ignoreCase = true) || str == "0") return false
+        return bytes[0].toInt() == 1
+    }
+
     @SuppressLint("MissingPermission")
     fun readBatteryInfo(device: BluetoothDevice): BatteryInfo {
         var main = -1
         var left = -1
         var right = -1
         var case = -1
+        var isLeftCharging: Boolean? = null
+        var isRightCharging: Boolean? = null
+        var isCaseCharging: Boolean? = null
 
-        // 1. Direct/Reflective getBatteryLevel() (API 27+)
+        // 1. Direct/Reflective getBatteryLevel() (API 27+ cached method)
         runCatching {
-            val method = device.javaClass.getMethod("getBatteryLevel")
-            val lvl = method.invoke(device) as? Int
+            val lvl = getBatteryLevelMethod?.invoke(device) as? Int
             if (lvl != null && lvl in 0..100) {
                 main = lvl
             }
         }
 
-        // 2. Broadcast-cached battery levels
+        // 1b. Direct probe on BluetoothDevice.getMetadata() (AOSP Fast Pair keys)
+        // Invoked via reflection; succeeds if system/ROM grants BLUETOOTH_PRIVILEGED or permits access
+        runCatching {
+            val metaMethod = getMetadataMethod
+            if (metaMethod != null) {
+                // Key 10: METADATA_UNTETHERED_LEFT_BATTERY
+                val leftBytes = metaMethod.invoke(device, 10) as? ByteArray
+                val parsedLeft = parseMetadataInt(leftBytes)
+                if (parsedLeft != null && parsedLeft in 0..100) left = parsedLeft
+
+                // Key 11: METADATA_UNTETHERED_RIGHT_BATTERY
+                val rightBytes = metaMethod.invoke(device, 11) as? ByteArray
+                val parsedRight = parseMetadataInt(rightBytes)
+                if (parsedRight != null && parsedRight in 0..100) right = parsedRight
+
+                // Key 12: METADATA_UNTETHERED_CASE_BATTERY
+                val caseBytes = metaMethod.invoke(device, 12) as? ByteArray
+                val parsedCase = parseMetadataInt(caseBytes)
+                if (parsedCase != null && parsedCase in 0..100) case = parsedCase
+
+                // Key 13: METADATA_UNTETHERED_LEFT_CHARGING
+                val leftChargingBytes = metaMethod.invoke(device, 13) as? ByteArray
+                isLeftCharging = parseMetadataBool(leftChargingBytes)
+
+                // Key 14: METADATA_UNTETHERED_RIGHT_CHARGING
+                val rightChargingBytes = metaMethod.invoke(device, 14) as? ByteArray
+                isRightCharging = parseMetadataBool(rightChargingBytes)
+
+                // Key 15: METADATA_UNTETHERED_CASE_CHARGING
+                val caseChargingBytes = metaMethod.invoke(device, 15) as? ByteArray
+                isCaseCharging = parseMetadataBool(caseChargingBytes)
+
+                // Key 18: METADATA_MAIN_BATTERY
+                if (main == -1) {
+                    val mainBytes = metaMethod.invoke(device, 18) as? ByteArray
+                    val parsedMain = parseMetadataInt(mainBytes)
+                    if (parsedMain != null && parsedMain in 0..100) main = parsedMain
+                }
+            }
+        }
+
+        // Working bud determination:
+        // If an earbud is charging in the case, it is NOT in the user's ear -> mark inactive (-1)
+        if (isLeftCharging == true) {
+            left = -1
+        }
+        if (isRightCharging == true) {
+            right = -1
+        }
+
+        // 2. Broadcast-cached levels for main & case only
+        // NEVER resurrect stale discrete buds (left/right) from cache!
         val cached = deviceBatteryCache[device.address]
         if (cached != null) {
             if (main == -1 && cached.mainLevel in 0..100) main = cached.mainLevel
-            if (left == -1 && cached.leftLevel in 0..100) left = cached.leftLevel
-            if (right == -1 && cached.rightLevel in 0..100) right = cached.rightLevel
             if (case == -1 && cached.caseLevel in 0..100) case = cached.caseLevel
         }
 
         val devType = inferDeviceType(device)
         val isEarbuds = devType == DeviceType.EARBUDS
+        val devName = try { device.name ?: "" } catch (_: SecurityException) { "" }
 
-        // 4. Persistent cache check (SharedPreferences)
-        val prefs = context.getSharedPreferences("device_battery_prefs", Context.MODE_PRIVATE)
+        // Check if device name explicitly indicates single Left or Right bud
+        val isExplicitLeft = devName.endsWith("(L)", ignoreCase = true) ||
+                             devName.endsWith(" L", ignoreCase = true) ||
+                             devName.contains(" Left", ignoreCase = true)
+        val isExplicitRight = devName.endsWith("(R)", ignoreCase = true) ||
+                              devName.endsWith(" R", ignoreCase = true) ||
+                              devName.contains(" Right", ignoreCase = true)
 
-        if (left == -1) {
-            val p = prefs.getInt("left_${device.address}", -1)
-            if (p in 0..100) left = p
+        if (isExplicitLeft && left == -1 && main in 0..100) {
+            left = main
+            right = -1
+        } else if (isExplicitRight && right == -1 && main in 0..100) {
+            right = main
+            left = -1
         }
-        if (right == -1) {
-            val p = prefs.getInt("right_${device.address}", -1)
-            if (p in 0..100) right = p
+
+        // Persistent cache check (SharedPreferences) as initial fallback for main & case only
+        val prefs = context.getSharedPreferences("device_battery_prefs", Context.MODE_PRIVATE)
+        if (main == -1 && left == -1 && right == -1) {
+            val pMain = prefs.getInt("main_${device.address}", -1)
+            if (pMain in 0..100) main = pMain
         }
         if (case == -1) {
             val p = prefs.getInt("case_${device.address}", -1)
             if (p in 0..100) case = p
         }
 
-        // 5. Harmonize Left and Right for TWS Earbuds
+        // TWS Earbuds level management:
+        // Only working buds are shown:
+        // - If both left & right are working: main = average
+        // - If only left is working: main = left, right remains -1
+        // - If only right is working: main = right, left remains -1
+        // - If neither discrete is working: left = -1, right = -1, main = unified
         if (isEarbuds) {
-            if (main in 0..100) {
-                if (left == -1) left = main
-                if (right == -1) right = main
-            } else if (left in 0..100 && right in 0..100) {
+            if (left in 0..100 && right in 0..100) {
                 main = (left + right) / 2
             } else if (left in 0..100) {
                 main = left
-                if (right == -1) right = left
             } else if (right in 0..100) {
                 main = right
-                if (left == -1) left = right
             }
-
-            // Case battery: NEVER synthesize case percentage from earbuds!
-            // If the case does not broadcast its own telemetry or is closed,
-            // case remains -1 so UI accurately displays "--".
         }
 
-        // 6. Persist confirmed levels to SharedPreferences only when values actually change
+        // Persist confirmed levels to SharedPreferences; remove keys for inactive buds so they don't resurrect
         val oldMain = prefs.getInt("main_${device.address}", -1)
         val oldLeft = prefs.getInt("left_${device.address}", -1)
         val oldRight = prefs.getInt("right_${device.address}", -1)
         val oldCase = prefs.getInt("case_${device.address}", -1)
         if (main != oldMain || left != oldLeft || right != oldRight || case != oldCase) {
             val editor = prefs.edit()
-            if (main in 0..100) editor.putInt("main_${device.address}", main)
-            if (left in 0..100) editor.putInt("left_${device.address}", left)
-            if (right in 0..100) editor.putInt("right_${device.address}", right)
-            if (case in 0..100) editor.putInt("case_${device.address}", case)
+            if (main in 0..100) editor.putInt("main_${device.address}", main) else editor.remove("main_${device.address}")
+            if (left in 0..100) editor.putInt("left_${device.address}", left) else editor.remove("left_${device.address}")
+            if (right in 0..100) editor.putInt("right_${device.address}", right) else editor.remove("right_${device.address}")
+            if (case in 0..100) editor.putInt("case_${device.address}", case) else editor.remove("case_${device.address}")
             editor.apply()
         }
 
-        val devName = try { device.name ?: "" } catch (_: SecurityException) { "" }
         val support = getCaseSupport(device, devName)
-        val caseBat = caseBatteryCache[device.address] ?: if (case in 0..100) {
-            CaseBattery(percent = case, charging = null, seenAtMillis = System.currentTimeMillis())
-        } else null
+        val caseBat = if (case in 0..100) {
+            val newCaseBat = CaseBattery(
+                percent = case,
+                charging = isCaseCharging ?: caseBatteryCache[device.address]?.charging,
+                seenAtMillis = System.currentTimeMillis()
+            )
+            caseBatteryCache[device.address] = newCaseBat
+            newCaseBat
+        } else {
+            caseBatteryCache[device.address]
+        }
+
         if (case == -1 && caseBat != null && caseBat.percent in 0..100) {
             case = caseBat.percent
         }
@@ -734,5 +876,29 @@ class BluetoothMonitor(
         )
         deviceBatteryCache[device.address] = info
         return info
+    }
+
+    fun dismissBatteryNotification(address: String) {
+        runCatching {
+            val nm = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+            val notifId = AppNotifications.NOTIF_BATTERY_STATUS + (address.hashCode() and 0x7FFF)
+            nm.cancel(notifId)
+            notifiedConnectionAddresses.remove(address)
+            lastNotifiedSummary.remove(address)
+            Log.i(TAG, "Dismissed battery status notification for $address (id=$notifId)")
+        }
+    }
+
+    fun dismissAllBatteryNotifications() {
+        runCatching {
+            val nm = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+            notifiedConnectionAddresses.forEach { addr ->
+                val notifId = AppNotifications.NOTIF_BATTERY_STATUS + (addr.hashCode() and 0x7FFF)
+                nm.cancel(notifId)
+            }
+            notifiedConnectionAddresses.clear()
+            lastNotifiedSummary.clear()
+            Log.i(TAG, "Dismissed all battery status notifications")
+        }
     }
 }

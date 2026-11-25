@@ -34,6 +34,7 @@ import com.smartbluetoothsleeptracker.ui.theme.*
 import com.smartbluetoothsleeptracker.viewmodel.DeviceUsageStat
 import com.smartbluetoothsleeptracker.viewmodel.UsagePeriod
 import com.smartbluetoothsleeptracker.viewmodel.UsageViewModel
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -46,6 +47,15 @@ fun UsageScreen(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var isPullRefreshing by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            isPullRefreshing = false
+        }
+    }
+
     var selectedDeviceAddress by remember { mutableStateOf<String?>(null) }
     val selectedDevice = state.deviceStats.find { it.device.address == selectedDeviceAddress }
     var showClearDialog by remember { mutableStateOf(false) }
@@ -87,8 +97,17 @@ fun UsageScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         PullToRefreshBox(
-            isRefreshing = state.isRefreshing,
-            onRefresh = { viewModel.refresh() },
+            isRefreshing = state.isRefreshing || isPullRefreshing,
+            onRefresh = {
+                scope.launch {
+                    isPullRefreshing = true
+                    try {
+                        viewModel.refreshNow()
+                    } finally {
+                        isPullRefreshing = false
+                    }
+                }
+            },
             modifier = Modifier.fillMaxSize()
         ) {
             LazyColumn(

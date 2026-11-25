@@ -36,6 +36,7 @@ data class AppSettings(
     val weeklySummaryEnabled: Boolean = false,
     val weeklySummaryHour: Int = 21, // 9 PM default
     val weeklySummaryDayOfWeek: Int = 7, // Sunday (ISO: 1=Mon..7=Sun)
+    val connectBatteryNotificationEnabled: Boolean = true,
 
     // Service
     val foregroundServiceEnabled: Boolean = true,
@@ -94,6 +95,7 @@ class AppPrefs(private val context: Context) {
                 weeklySummaryEnabled    = prefs[WEEKLY_SUMMARY] ?: false,
                 weeklySummaryHour       = prefs[WEEKLY_SUMMARY_HOUR] ?: 21,
                 weeklySummaryDayOfWeek  = prefs[WEEKLY_SUMMARY_DAY] ?: 7,
+                connectBatteryNotificationEnabled = prefs[CONNECT_BATTERY_NOTIF] ?: true,
                 foregroundServiceEnabled= prefs[FG_SERVICE] ?: true,
                 themeMode               = prefs[THEME_MODE] ?: "DARK",
                 onboardingComplete      = prefs[ONBOARDING_COMPLETE] ?: false,
@@ -139,6 +141,7 @@ class AppPrefs(private val context: Context) {
     suspend fun setWeeklySummary(on: Boolean)     = ds.edit { it[WEEKLY_SUMMARY] = on }
     suspend fun setWeeklySummaryHour(h: Int)      = ds.edit { it[WEEKLY_SUMMARY_HOUR] = h.coerceIn(0, 23) }
     suspend fun setWeeklySummaryDay(d: Int)       = ds.edit { it[WEEKLY_SUMMARY_DAY] = d.coerceIn(1, 7) }
+    suspend fun setConnectBatteryNotification(on: Boolean) = ds.edit { it[CONNECT_BATTERY_NOTIF] = on }
     suspend fun setCustomCategories(json: String) = ds.edit { it[CUSTOM_CATEGORIES] = json }
     suspend fun setAnalyticsEnabled(on: Boolean)  = ds.edit { it[ANALYTICS_ENABLED] = on }
     suspend fun setLastUpdateCheckTime(ts: Long)  = ds.edit { it[LAST_UPDATE_CHECK] = ts }
@@ -182,6 +185,7 @@ class AppPrefs(private val context: Context) {
         val WEEKLY_SUMMARY      = booleanPreferencesKey("weekly_summary")
         val WEEKLY_SUMMARY_HOUR = intPreferencesKey("weekly_summary_hour")
         val WEEKLY_SUMMARY_DAY  = intPreferencesKey("weekly_summary_day")
+        val CONNECT_BATTERY_NOTIF = booleanPreferencesKey("connect_battery_notif")
         val FG_SERVICE          = booleanPreferencesKey("fg_service")
         val THEME_MODE          = stringPreferencesKey("theme_mode")
         val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")

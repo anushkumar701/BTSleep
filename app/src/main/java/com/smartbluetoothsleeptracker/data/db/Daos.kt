@@ -116,6 +116,15 @@ interface SessionDao {
     @Query("DELETE FROM sessions WHERE (end_time IS NOT NULL AND (actual_duration_min IS NULL OR actual_duration_min <= 0)) OR (actual_duration_min <= 0 AND planned_duration_min <= 0)")
     suspend fun deleteEmptySessions()
 
+    @Query("DELETE FROM sessions WHERE actual_duration_min > 720 OR (actual_duration_min IS NOT NULL AND actual_duration_min < 0)")
+    suspend fun deleteCorruptedSessions()
+
+    @Query("DELETE FROM sessions WHERE end_time IS NULL")
+    suspend fun deleteOrphanedSessions()
+
+    @Query("SELECT * FROM sessions WHERE actual_duration_min > 0 AND actual_duration_min <= 720 ORDER BY start_time ASC")
+    suspend fun getAllValidSessionsNow(): List<SessionEntity>
+
     @Query("DELETE FROM sessions WHERE id NOT IN (SELECT id FROM sessions ORDER BY start_time DESC LIMIT :maxKeep)")
     suspend fun pruneOldSessions(maxKeep: Int = 500)
 }
@@ -156,6 +165,9 @@ interface DailyUsageDao {
 
     @Query("DELETE FROM daily_usage WHERE device_address = :address AND date = :date")
     suspend fun deleteForDeviceAndDate(address: String, date: String)
+
+    @Query("DELETE FROM daily_usage WHERE total_minutes > 1440 OR total_minutes < 0")
+    suspend fun deleteCorruptedUsage()
 
     @Query("DELETE FROM daily_usage")
     suspend fun deleteAll()

@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
@@ -311,7 +312,8 @@ fun HomeScreen(
                 devices = state.connectedDevices,
                 btEnabled = state.btEnabled,
                 cooldownActive = state.cooldown.active,
-                onToggleFavorite = { viewModel.togglePrimaryDevice(it) }
+                onToggleFavorite = { viewModel.togglePrimaryDevice(it) },
+                onRefresh = { viewModel.refreshBluetooth() }
             )
 
             Spacer(Modifier.height(12.dp))
@@ -447,8 +449,11 @@ fun HomeScreen(
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
-                                .scale(scale)
-                                .graphicsLayer { this.alpha = alpha }
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    this.alpha = alpha
+                                }
                                 .background(StatusGreen, CircleShape)
                         )
                         Spacer(Modifier.width(10.dp))
@@ -687,7 +692,10 @@ fun HomeScreen(
                         } else Modifier
                     )
             ) {
-                DeviceBatteryCard(devices = state.connectedDevices)
+                DeviceBatteryCard(
+                    devices = state.connectedDevices,
+                    onRefresh = { viewModel.refreshBluetooth() }
+                )
             }
 
             Spacer(Modifier.height(14.dp))
@@ -870,14 +878,17 @@ fun HomeScreen(
             val isEnabled = state.connectedDevices.isNotEmpty() && (state.btEnabled || state.connectedDevices.any { it.type == com.smartbluetoothsleeptracker.data.db.DeviceType.WIRED_HEADPHONES })
 
             Box(modifier = Modifier.fillMaxWidth()) {
-                // Glow ring behind button
+                // Glow ring behind button (GPU RenderThread compositing — zero recompositions)
                 if (isEnabled) {
                     Box(
                         modifier = Modifier
                             .matchParentSize()
                             .padding(horizontal = 4.dp)
+                            .graphicsLayer {
+                                this.alpha = glowAlpha
+                            }
                             .background(
-                                AccentBlue.copy(alpha = glowAlpha),
+                                AccentBlue,
                                 RoundedCornerShape(20.dp)
                             )
                     )
@@ -1007,7 +1018,8 @@ private fun ConnectionStatusBar(
     devices: List<ConnectedDevice>,
     btEnabled: Boolean,
     cooldownActive: Boolean,
-    onToggleFavorite: (String) -> Unit = {}
+    onToggleFavorite: (String) -> Unit = {},
+    onRefresh: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val isClickableAction = (devices.isEmpty() || !btEnabled) && !cooldownActive
@@ -1059,7 +1071,7 @@ private fun ConnectionStatusBar(
             label = "pulseAlpha"
         )
 
-        Box(Modifier.size(10.dp).scale(scale).graphicsLayer { this.alpha = alpha }.background(animatedDotColor, CircleShape))
+        Box(Modifier.size(10.dp).graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }.background(animatedDotColor, CircleShape))
 
         Spacer(Modifier.width(12.dp))
 
@@ -1132,16 +1144,30 @@ private fun ConnectionStatusBar(
         if (devices.isNotEmpty()) {
             val primary = devices.firstOrNull { it.isFavorite }
             val target = primary ?: devices.first()
-            IconButton(
-                onClick = { onToggleFavorite(target.address) },
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = if (primary != null) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                    contentDescription = if (primary != null) "Primary Sleep Target" else "Set as Primary Sleep Target",
-                    tint = if (primary != null) AccentBlue else TextTertiary,
-                    modifier = Modifier.size(20.dp)
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = onRefresh,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = "Refresh Bluetooth devices",
+                        tint = TextTertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(Modifier.width(2.dp))
+                IconButton(
+                    onClick = { onToggleFavorite(target.address) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = if (primary != null) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                        contentDescription = if (primary != null) "Primary Sleep Target" else "Set as Primary Sleep Target",
+                        tint = if (primary != null) AccentBlue else TextTertiary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         } else if (isClickableAction) {
             Icon(Icons.Rounded.ChevronRight, "Open Bluetooth settings", tint = TextTertiary, modifier = Modifier.size(18.dp))
@@ -1477,12 +1503,12 @@ private fun CountdownDisplay(remainingMs: Long, totalDurationMs: Long) {
                     val inset = strokeWidth / 2f
                     val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
                     val topLeft = Offset(inset, inset)
+                    val sweepBrush = Brush.sweepGradient(gradientColors)
                     onDrawBehind {
                         // Gray background track
                         drawArc(Surface3, 0f, 360f, false, topLeft, arcSize, style = stroke)
                         // Active colored sweep
                         if (animatedProgress > 0f) {
-                            val sweepBrush = Brush.sweepGradient(gradientColors)
                             // Outer glow
                             drawArc(
                                 brush = sweepBrush,
@@ -1550,9 +1576,16 @@ private fun RotaryDial(
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .aspectRatio(1f),
+                .aspectRatio(1f)
+                .onSizeChanged { intSize ->
+                    val strokeWidth = 24.dp.value * (intSize.width / 300f).coerceAtLeast(1f)
+                    val inset = strokeWidth / 2f
+                    centerPx = Offset(intSize.width / 2f, intSize.height / 2f)
+                    sizePx = intSize.width / 2f - inset
+                },
             contentAlignment = Alignment.Center
         ) {
+            val sweepGradient = remember { Brush.sweepGradient(listOf(AccentBlue, AccentCyan, AccentPurple)) }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1562,8 +1595,8 @@ private fun RotaryDial(
                         val inset = strokeWidth / 2f
                         val arcRect = Size(size.width - inset * 2, size.height - inset * 2)
                         val topLeft = Offset(inset, inset)
-                        centerPx = Offset(size.width / 2f, size.height / 2f)
-                        sizePx = size.width / 2f - inset
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        val radius = size.width / 2f - inset
 
                         onDrawBehind {
                             // Track
@@ -1571,7 +1604,7 @@ private fun RotaryDial(
                             // Fill
                             if (sweepAngle > 0f) {
                                 drawArc(
-                                    brush = Brush.sweepGradient(listOf(AccentBlue, AccentCyan, AccentPurple)),
+                                    brush = sweepGradient,
                                     startAngle = DIAL_START,
                                     sweepAngle = sweepAngle,
                                     useCenter = false,
@@ -1581,8 +1614,8 @@ private fun RotaryDial(
                                 )
                                 // Thumb
                                 val thumbRad = Math.toRadians((DIAL_START + sweepAngle).toDouble())
-                                val tx = centerPx.x + sizePx * cos(thumbRad).toFloat()
-                                val ty = centerPx.y + sizePx * sin(thumbRad).toFloat()
+                                val tx = center.x + radius * cos(thumbRad).toFloat()
+                                val ty = center.y + radius * sin(thumbRad).toFloat()
                                 drawCircle(Color.White, 16.dp.toPx(), Offset(tx, ty))
                                 drawCircle(AccentBlue, 10.dp.toPx(), Offset(tx, ty))
                             }
@@ -1681,8 +1714,18 @@ private fun RotaryDial(
 }
 
 @Composable
-private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
+private fun DeviceBatteryCard(
+    devices: List<ConnectedDevice>,
+    onRefresh: () -> Unit = {}
+) {
     val activeDevice = devices.firstOrNull { it.isFavorite } ?: devices.firstOrNull()
+    var isSpinning by remember { mutableStateOf(false) }
+    val spinRotation by animateFloatAsState(
+        targetValue = if (isSpinning) 360f else 0f,
+        animationSpec = tween(durationMillis = 600, easing = LinearEasing),
+        finishedListener = { isSpinning = false },
+        label = "spinRotation"
+    )
 
     if (activeDevice == null) {
         Card(
@@ -1728,11 +1771,9 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
     // Poll case battery while Home screen is visible and an earbuds device is connected
     LaunchedEffect(activeDevice.address, hasScanPermission) {
         val dev = activeDevice.device ?: return@LaunchedEffect
-        com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.instance?.get()?.syncActiveNotifications()
         if (isEarbuds) {
             while (isActive) {
                 app?.btMonitor?.queryCaseBattery(dev, activeDevice.name)
-                com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.instance?.get()?.syncActiveNotifications()
                 delay(60_000L)
             }
         }
@@ -1775,26 +1816,58 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Box(
-                        modifier = Modifier
-                            .background(Surface3, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "TWS Earbuds",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = 10.sp,
-                            color = TextSecondary,
-                            fontWeight = FontWeight.Medium
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .background(Surface3, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "TWS Earbuds",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                color = TextSecondary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(
+                            onClick = {
+                                isSpinning = true
+                                onRefresh()
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "Refresh Battery Status",
+                                tint = AccentCyan,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .graphicsLayer { rotationZ = spinRotation }
+                            )
+                        }
                     }
                 }
 
                 Spacer(Modifier.height(12.dp))
 
+                val hasLeft = battery.leftLevel in 0..100
+                val hasRight = battery.rightLevel in 0..100
+                val hasMain = battery.mainLevel in 0..100
                 val caseBat = battery.caseBattery
                 val caseLvl = if (battery.caseLevel in 0..100) battery.caseLevel else -1
                 val isCaseKnown = caseLvl in 0..100
+
+                val now = System.currentTimeMillis()
+                val isStale = isCaseKnown && caseBat != null && (now - caseBat.seenAtMillis > 5 * 60 * 1000L)
+                val caseSubtext = when {
+                    isStale && caseBat != null -> {
+                        val mins = ((now - caseBat.seenAtMillis) / 60_000L).coerceAtLeast(1L)
+                        "seen ${mins}m ago"
+                    }
+                    else -> null
+                }
 
                 // Left, Right, Case battery cells
                 Row(
@@ -1802,45 +1875,56 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val leftLvl = when {
-                        battery.leftLevel in 0..100 -> battery.leftLevel
-                        battery.mainLevel in 0..100 -> battery.mainLevel
-                        battery.rightLevel in 0..100 -> battery.rightLevel
-                        else -> -1
-                    }
-                    val rightLvl = when {
-                        battery.rightLevel in 0..100 -> battery.rightLevel
-                        battery.mainLevel in 0..100 -> battery.mainLevel
-                        battery.leftLevel in 0..100 -> battery.leftLevel
-                        else -> -1
-                    }
-                    val now = System.currentTimeMillis()
-                    val isStale = isCaseKnown && caseBat != null && (now - caseBat.seenAtMillis > 5 * 60 * 1000L)
-                    val caseSubtext = when {
-                        isStale && caseBat != null -> {
-                            val mins = ((now - caseBat.seenAtMillis) / 60_000L).coerceAtLeast(1L)
-                            "seen ${mins}m ago"
+                    when {
+                        hasLeft && hasRight -> {
+                            EarbudBatteryItem(
+                                label = "Left",
+                                level = battery.leftLevel,
+                                icon = Icons.Rounded.Hearing
+                            )
+                            VerticalDivider(
+                                modifier = Modifier.height(26.dp),
+                                color = Surface3,
+                                thickness = 1.dp
+                            )
+                            EarbudBatteryItem(
+                                label = "Right",
+                                level = battery.rightLevel,
+                                icon = Icons.Rounded.Hearing
+                            )
                         }
-                        else -> null
+                        hasLeft && !hasRight -> {
+                            // Only Left bud in use
+                            EarbudBatteryItem(
+                                label = "Left Bud",
+                                level = battery.leftLevel,
+                                icon = Icons.Rounded.Hearing
+                            )
+                        }
+                        !hasLeft && hasRight -> {
+                            // Only Right bud in use
+                            EarbudBatteryItem(
+                                label = "Right Bud",
+                                level = battery.rightLevel,
+                                icon = Icons.Rounded.Hearing
+                            )
+                        }
+                        hasMain -> {
+                            // Unified earbud level
+                            EarbudBatteryItem(
+                                label = "Earbuds",
+                                level = battery.mainLevel,
+                                icon = Icons.Rounded.Hearing
+                            )
+                        }
+                        else -> {
+                            EarbudBatteryItem(
+                                label = "Earbuds",
+                                level = -1,
+                                icon = Icons.Rounded.Hearing
+                            )
+                        }
                     }
-
-                    EarbudBatteryItem(
-                        label = "Left",
-                        level = leftLvl,
-                        icon = Icons.Rounded.Hearing
-                    )
-
-                    VerticalDivider(
-                        modifier = Modifier.height(26.dp),
-                        color = Surface3,
-                        thickness = 1.dp
-                    )
-
-                    EarbudBatteryItem(
-                        label = "Right",
-                        level = rightLvl,
-                        icon = Icons.Rounded.Hearing
-                    )
 
                     if (isCaseKnown) {
                         VerticalDivider(
@@ -1855,37 +1939,6 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
                             icon = Icons.Rounded.Inbox,
                             isCharging = caseBat?.charging,
                             subtext = caseSubtext
-                        )
-                    }
-                }
-
-                if (!isCaseKnown && !com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.isAccessGranted(context)) {
-                    Spacer(Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Surface3.copy(alpha = 0.5f))
-                            .clickable {
-                                com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.openNotificationAccessSettings(context)
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Sync,
-                            contentDescription = null,
-                            tint = AccentBlue,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "Tap to enable Fast Pair sync for Case battery",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = 11.sp,
-                            color = AccentBlue,
-                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -1946,39 +1999,58 @@ private fun DeviceBatteryCard(devices: List<ConnectedDevice>) {
                     }
                 }
 
-                // Battery Indicator Pill
-                val mainLvl = battery.mainLevel
-                val batteryColor = when {
-                    mainLvl >= 50 -> StatusGreen
-                    mainLvl in 20..49 -> StatusOrange
-                    mainLvl in 0..19 -> StatusRed
-                    else -> TextTertiary
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .background(batteryColor.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        imageVector = when {
-                            mainLvl >= 80 -> Icons.Rounded.BatteryFull
-                            mainLvl >= 50 -> Icons.Rounded.Battery5Bar
-                            mainLvl >= 20 -> Icons.Rounded.Battery3Bar
-                            mainLvl in 0..19 -> Icons.Rounded.BatteryAlert
-                            else -> Icons.Rounded.Battery0Bar
-                        },
-                        contentDescription = null,
-                        tint = batteryColor,
-                        modifier = Modifier.size(16.dp)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Battery Indicator Pill
+                    val mainLvl = battery.mainLevel
+                    val batteryColor = when {
+                        mainLvl >= 50 -> StatusGreen
+                        mainLvl in 20..49 -> StatusOrange
+                        mainLvl in 0..19 -> StatusRed
+                        else -> TextTertiary
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .background(batteryColor.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                mainLvl >= 80 -> Icons.Rounded.BatteryFull
+                                mainLvl >= 50 -> Icons.Rounded.Battery5Bar
+                                mainLvl >= 20 -> Icons.Rounded.Battery3Bar
+                                mainLvl in 0..19 -> Icons.Rounded.BatteryAlert
+                                else -> Icons.Rounded.Battery0Bar
+                            },
+                            contentDescription = null,
+                            tint = batteryColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = if (mainLvl in 0..100) "$mainLvl%" else "Connected",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = batteryColor
+                        )
+                    }
                     Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = if (mainLvl in 0..100) "$mainLvl%" else "Connected",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = batteryColor
-                    )
+                    IconButton(
+                        onClick = {
+                            isSpinning = true
+                            onRefresh()
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Refresh Battery Status",
+                            tint = AccentCyan,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .graphicsLayer { rotationZ = spinRotation }
+                        )
+                    }
                 }
             }
         }

@@ -311,26 +311,28 @@ class TimerService : Service() {
                 val connectTime = com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.getActiveConnectTime(app, addr)
                 if (connectTime > 0L && sessionStartTime > connectTime) {
                     val priorMs = sessionStartTime - connectTime
-                    val priorMin = TimerCalculations.calculateDurationMinutes(priorMs)
-                    if (priorMin >= 1) {
-                        val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-                        val dev = app.db.deviceDao().getDevice(addr)
-                        app.db.sessionDao().insert(
-                            SessionEntity(
-                                deviceAddress = addr,
-                                deviceName = dev?.name ?: addr,
-                                startTime = connectTime,
-                                endTime = sessionStartTime,
-                                plannedDurationMin = priorMin,
-                                actualDurationMin = priorMin,
-                                disconnectConfirmed = false,
-                                date = today
+                    if (priorMs in 30_000L until (6 * 60 * 60_000L)) {
+                        val priorMin = TimerCalculations.calculateDurationMinutes(priorMs)
+                        if (priorMin in 1..360) {
+                            val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                            val dev = app.db.deviceDao().getDevice(addr)
+                            app.db.sessionDao().insert(
+                                SessionEntity(
+                                    deviceAddress = addr,
+                                    deviceName = dev?.name ?: addr,
+                                    startTime = connectTime,
+                                    endTime = sessionStartTime,
+                                    plannedDurationMin = priorMin,
+                                    actualDurationMin = priorMin,
+                                    disconnectConfirmed = false,
+                                    date = today
+                                )
                             )
-                        )
-                        app.db.dailyUsageDao().recordUsage(today, addr, priorMin)
+                            app.db.dailyUsageDao().recordUsage(today, addr, priorMin)
+                        }
                     }
                 }
-                // Set connect time to sessionStartTime so future background time does not double-count
+                // Update connect time to sessionStartTime so future background time does not double-count
                 com.smartbluetoothsleeptracker.receiver.BluetoothReceiver.setActiveConnectTime(app, addr, sessionStartTime)
             }
 
@@ -452,8 +454,9 @@ class TimerService : Service() {
                 val remaining = (targetElapsedRealtime - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
 
                 if (remaining <= 0) {
-                    val nm = getSystemService(android.app.NotificationManager::class.java)
-                    nm.cancel(AppNotifications.NOTIF_TIMER)
+                    val finishingNotif = AppNotifications.finishingNotification(this@TimerService).build()
+                    startForegroundSafe(AppNotifications.NOTIF_TIMER, finishingNotif)
+
                     app.updateTimerState(ActiveTimerState(isRunning = false, remainingMs = 0L))
                     onTimerExpired(fromUserEndNow = false)
                     return@launch
@@ -565,13 +568,14 @@ class TimerService : Service() {
         cancelExpiryAlarm()
         tickJob?.cancel()
 
+        // Immediately remove chronometer from notification so it never ticks into negative numbers (-0:01, -0:12)
+        val finishingNotif = AppNotifications.finishingNotification(this).build()
+        startForegroundSafe(AppNotifications.NOTIF_TIMER, finishingNotif)
+
         scope.launch {
             try {
                 cachedSettings = app.prefs.settings.first()
                 val settings = cachedSettings
-
-                val nm = getSystemService(android.app.NotificationManager::class.java)
-                nm.cancel(AppNotifications.NOTIF_TIMER)
 
                 // ── Safety Guard: Active Call Protection (Telephony & VoIP e.g. WhatsApp/Meet) ─
                 val am = getSystemService(android.media.AudioManager::class.java)
@@ -740,6 +744,8 @@ class TimerService : Service() {
                 releaseWakeLock()
                 app.playbackController.abandonAudioFocus()
                 ServiceCompat.stopForeground(this@TimerService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                val nm = getSystemService(android.app.NotificationManager::class.java)
+                nm.cancel(AppNotifications.NOTIF_TIMER)
                 app.updateTimerState(ActiveTimerState())
                 if (!app.disconnector.isCooldownActive) {
                     isRunning = false
@@ -989,19 +995,20 @@ class TimerService : Service() {
         cooldownTickJob?.cancel()
         cooldownTickJob = scope.launch {
             val nm = getSystemService(android.app.NotificationManager::class.java)
+            nm.cancel(AppNotifications.NOTIF_TIMER)
             val devName = getDeviceName(targetAddresses.firstOrNull())
             while (app.disconnector.isCooldownActive) {
                 val remaining = (app.disconnector.cooldownState.value.expiresAt - System.currentTimeMillis()) / 1000
                 if (remaining <= 0) break
-                nm.notify(
-                    AppNotifications.NOTIF_COOLDOWN,
-                    AppNotifications.cooldownNotification(this@TimerService, remaining.toInt(), devName).build()
-                )
+                val notif = AppNotifications.cooldownNotification(this@TimerService, remaining.toInt(), devName).build()
+                startForegroundSafe(AppNotifications.NOTIF_COOLDOWN, notif)
                 delay(1000)
             }
             nm.cancel(AppNotifications.NOTIF_COOLDOWN)
             app.disconnector.endCooldown()
             Log.i(TAG, "Cooldown expired naturally, stopping service")
+            ServiceCompat.stopForeground(this@TimerService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            isRunning = false
             stopSelf()
         }
     }

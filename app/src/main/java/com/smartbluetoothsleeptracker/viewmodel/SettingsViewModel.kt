@@ -110,13 +110,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             settingsAction = Settings.ACTION_SECURITY_SETTINGS
         ))
 
-        // 5. Earbuds Battery Sync (Fast Pair Notification Access)
-        list.add(PermissionStatus(
-            name = "Earbuds Case Battery Sync",
-            description = "Reads earbuds & case battery via Fast Pair notifications",
-            granted = com.smartbluetoothsleeptracker.core.bluetooth.FastPairNotificationListener.isAccessGranted(ctx),
-            settingsAction = Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
-        ))
 
         return list
     }
@@ -145,6 +138,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setWeeklySummary(on: Boolean)     = viewModelScope.launch { app.prefs.setWeeklySummary(on) }
     fun setWeeklySummaryHour(h: Int)      = viewModelScope.launch { app.prefs.setWeeklySummaryHour(h) }
     fun setWeeklySummaryDay(d: Int)       = viewModelScope.launch { app.prefs.setWeeklySummaryDay(d) }
+    fun setConnectBatteryNotification(on: Boolean) = viewModelScope.launch { app.prefs.setConnectBatteryNotification(on) }
 
     // Service
     fun setForegroundService(on: Boolean) = viewModelScope.launch { app.prefs.setForegroundService(on) }

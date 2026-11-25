@@ -152,4 +152,59 @@ class CaseBatteryTest {
         assertEquals(-1, info.caseLevel)
         assertNull(info.caseBattery)
     }
+
+    @Test
+    fun testBatteryInfo_formatSummary_bothBuds() {
+        val info = BatteryInfo(mainLevel = 85, leftLevel = 80, rightLevel = 90)
+        assertEquals("Left: 80%  •  Right: 90%", info.formatSummary(com.smartbluetoothsleeptracker.data.db.DeviceType.EARBUDS))
+    }
+
+    @Test
+    fun testBatteryInfo_formatSummary_singleLeftBud() {
+        val info = BatteryInfo(mainLevel = 80, leftLevel = 80, rightLevel = -1)
+        assertEquals("Left: 80%", info.formatSummary(com.smartbluetoothsleeptracker.data.db.DeviceType.EARBUDS))
+    }
+
+    @Test
+    fun testBatteryInfo_formatSummary_singleRightBud() {
+        val info = BatteryInfo(mainLevel = 90, leftLevel = -1, rightLevel = 90)
+        assertEquals("Right: 90%", info.formatSummary(com.smartbluetoothsleeptracker.data.db.DeviceType.EARBUDS))
+    }
+
+    @Test
+    fun testBatteryInfo_formatSummary_withCase() {
+        val info = BatteryInfo(
+            mainLevel = 80,
+            leftLevel = 80,
+            rightLevel = -1,
+            caseLevel = 65,
+            caseBattery = CaseBattery(percent = 65, charging = false, seenAtMillis = System.currentTimeMillis())
+        )
+        assertEquals("Left: 80%  •  Case: 65%", info.formatSummary(com.smartbluetoothsleeptracker.data.db.DeviceType.EARBUDS))
+    }
+
+    @Test
+    fun testBatteryInfo_formatSummary_withChargingCase() {
+        val info = BatteryInfo(
+            mainLevel = 80,
+            leftLevel = 80,
+            rightLevel = 85,
+            caseLevel = 100,
+            caseBattery = CaseBattery(percent = 100, charging = true, seenAtMillis = System.currentTimeMillis())
+        )
+        assertEquals("Left: 80%  •  Right: 85%  •  Case: 100% ⚡", info.formatSummary(com.smartbluetoothsleeptracker.data.db.DeviceType.EARBUDS))
+    }
+
+    @Test
+    fun testBatteryInfo_formatSummary_singleDevice() {
+        val info = BatteryInfo(mainLevel = 70)
+        assertEquals("Battery: 70%", info.formatSummary(com.smartbluetoothsleeptracker.data.db.DeviceType.NECKBAND))
+    }
+
+    @Test
+    fun testBatteryInfo_formatSummary_unknown() {
+        val info = BatteryInfo()
+        assertEquals("Connected", info.formatSummary(com.smartbluetoothsleeptracker.data.db.DeviceType.EARBUDS))
+    }
 }
+

@@ -52,7 +52,7 @@ class SleepBTApp : Application() {
         db = AppDatabase.get(this)
         prefs = AppPrefs(this)
         disconnector = BluetoothDisconnector(this, db)
-        btMonitor = BluetoothMonitor(this, db).apply {
+        btMonitor = BluetoothMonitor(this, db, prefs).apply {
             registerCaseProvider(com.smartbluetoothsleeptracker.core.bluetooth.case.AppleCaseBatteryProvider(this@SleepBTApp))
             registerCaseProvider(com.smartbluetoothsleeptracker.core.bluetooth.case.GalaxyBudsCaseBatteryProvider(this@SleepBTApp))
         }
